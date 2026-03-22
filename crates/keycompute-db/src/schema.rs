@@ -1,0 +1,138 @@
+//! 数据库表结构定义
+//!
+//! 本模块提供表名和列名的常量定义，用于构建类型安全的查询
+
+/// 表名常量
+pub mod tables {
+    pub const USERS: &str = "users";
+    pub const TENANTS: &str = "tenants";
+    pub const API_KEYS: &str = "api_keys";
+    pub const ACCOUNTS: &str = "accounts";
+    pub const PRICING_MODELS: &str = "pricing_models";
+    pub const USAGE_LOGS: &str = "usage_logs";
+    pub const DISTRIBUTION_RECORDS: &str = "distribution_records";
+    pub const TENANT_DISTRIBUTION_RULES: &str = "tenant_distribution_rules";
+}
+
+/// users 表列名
+pub mod users {
+    pub const ID: &str = "id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const EMAIL: &str = "email";
+    pub const NAME: &str = "name";
+    pub const ROLE: &str = "role";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
+}
+
+/// tenants 表列名
+pub mod tenants {
+    pub const ID: &str = "id";
+    pub const NAME: &str = "name";
+    pub const SLUG: &str = "slug";
+    pub const DESCRIPTION: &str = "description";
+    pub const STATUS: &str = "status";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
+}
+
+/// api_keys 表列名
+pub mod api_keys {
+    pub const ID: &str = "id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const USER_ID: &str = "user_id";
+    pub const NAME: &str = "name";
+    pub const KEY_HASH: &str = "key_hash";
+    pub const KEY_PREVIEW: &str = "key_preview";
+    pub const REVOKED: &str = "revoked";
+    pub const REVOKED_AT: &str = "revoked_at";
+    pub const EXPIRES_AT: &str = "expires_at";
+    pub const LAST_USED_AT: &str = "last_used_at";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
+}
+
+/// accounts 表列名
+pub mod accounts {
+    pub const ID: &str = "id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const PROVIDER: &str = "provider";
+    pub const NAME: &str = "name";
+    pub const ENDPOINT: &str = "endpoint";
+    pub const API_KEY_ENCRYPTED: &str = "api_key_encrypted";
+    pub const API_KEY_PREVIEW: &str = "api_key_preview";
+    pub const RPM_LIMIT: &str = "rpm_limit";
+    pub const TPM_LIMIT: &str = "tpm_limit";
+    pub const PRIORITY: &str = "priority";
+    pub const ENABLED: &str = "enabled";
+    pub const MODELS_SUPPORTED: &str = "models_supported";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
+}
+
+/// pricing_models 表列名
+pub mod pricing_models {
+    pub const ID: &str = "id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const MODEL_NAME: &str = "model_name";
+    pub const PROVIDER: &str = "provider";
+    pub const CURRENCY: &str = "currency";
+    pub const INPUT_PRICE_PER_1K: &str = "input_price_per_1k";
+    pub const OUTPUT_PRICE_PER_1K: &str = "output_price_per_1k";
+    pub const IS_DEFAULT: &str = "is_default";
+    pub const EFFECTIVE_FROM: &str = "effective_from";
+    pub const EFFECTIVE_UNTIL: &str = "effective_until";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
+}
+
+/// usage_logs 表列名
+pub mod usage_logs {
+    pub const ID: &str = "id";
+    pub const REQUEST_ID: &str = "request_id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const USER_ID: &str = "user_id";
+    pub const API_KEY_ID: &str = "api_key_id";
+    pub const MODEL_NAME: &str = "model_name";
+    pub const PROVIDER_NAME: &str = "provider_name";
+    pub const ACCOUNT_ID: &str = "account_id";
+    pub const INPUT_TOKENS: &str = "input_tokens";
+    pub const OUTPUT_TOKENS: &str = "output_tokens";
+    pub const TOTAL_TOKENS: &str = "total_tokens";
+    pub const INPUT_UNIT_PRICE_SNAPSHOT: &str = "input_unit_price_snapshot";
+    pub const OUTPUT_UNIT_PRICE_SNAPSHOT: &str = "output_unit_price_snapshot";
+    pub const USER_AMOUNT: &str = "user_amount";
+    pub const CURRENCY: &str = "currency";
+    pub const USAGE_SOURCE: &str = "usage_source";
+    pub const STATUS: &str = "status";
+    pub const STARTED_AT: &str = "started_at";
+    pub const FINISHED_AT: &str = "finished_at";
+    pub const CREATED_AT: &str = "created_at";
+}
+
+/// distribution_records 表列名
+pub mod distribution_records {
+    pub const ID: &str = "id";
+    pub const USAGE_LOG_ID: &str = "usage_log_id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const BENEFICIARY_ID: &str = "beneficiary_id";
+    pub const SHARE_AMOUNT: &str = "share_amount";
+    pub const SHARE_RATIO: &str = "share_ratio";
+    pub const STATUS: &str = "status";
+    pub const SETTLED_AT: &str = "settled_at";
+    pub const CREATED_AT: &str = "created_at";
+}
+
+/// tenant_distribution_rules 表列名
+pub mod tenant_distribution_rules {
+    pub const ID: &str = "id";
+    pub const TENANT_ID: &str = "tenant_id";
+    pub const BENEFICIARY_ID: &str = "beneficiary_id";
+    pub const SHARE_RATIO: &str = "share_ratio";
+    pub const PRIORITY: &str = "priority";
+    pub const ENABLED: &str = "enabled";
+    pub const EFFECTIVE_FROM: &str = "effective_from";
+    pub const EFFECTIVE_UNTIL: &str = "effective_until";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
+}

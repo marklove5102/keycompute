@@ -12,5 +12,6 @@ members = [
 dioxus = { version = "0.7.1" }
 
 # workspace
+keycompute-types = { path = "crates/keycompute-types" }
 ui = { path = "packages/ui" }
 api = { path = "packages/api" }

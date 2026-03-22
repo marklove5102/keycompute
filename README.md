@@ -1,6 +1,6 @@
 # KeyCompute
 
-KeyCompute 是一个高性能，易拓展，开箱即用的 AI 算力服务平台，提供统一的大模型接入、智能路由、计费和可观测性服务。
+KeyCompute 是一个高性能，易拓展，开箱即用的 AI 算力服务平台y，提供统一的大模型接入、智能路由、计费和可观测性等服务。
 
 支持多种类型的 AI API 算力池聚合，包括不限于自建算力，公共厂商，OAuth 代理等。
 
@@ -56,7 +56,7 @@ cargo fmt --check
 | 阶段 | 模块 | 状态 |
 |:---:|:---|:---:|
 | P0 | keycompute-types, keycompute-observability | ✅ |
-| P1 | keycompute-db | ⏳ |
+| P1 | keycompute-db | ✅ |
 | P2 | Provider Trait, OpenAI Adapter | ⏳ |
 | P3 | keycompute-runtime | ⏳ |
 | P4 | Auth, RateLimit, Pricing, Routing | ⏳ |
