@@ -4,8 +4,9 @@
 
 use crate::{
     handlers::{
-        calculate_cost, chat_completions, check_provider_health, debug_routing, get_execution_stats,
-        get_gateway_status, get_pricing, get_provider_health, health_check, list_models,
+        calculate_cost, chat_completions, check_provider_health, debug_routing, get_billing_stats,
+        get_execution_stats, get_gateway_status, get_pricing, get_pricing_cost, get_provider_health,
+        health_check, list_billing_records, list_models, trigger_billing,
     },
     middleware::{
         cors_layer, rate_limit_middleware, request_logger, trace_id_middleware,
@@ -31,7 +32,15 @@ pub fn create_router(state: AppState) -> Router {
     // 定价管理路由（需要限流）
     let pricing_routes = Router::new()
         .route("/v1/pricing", get(get_pricing))
-        .route("/v1/pricing/calculate", post(calculate_cost))
+        .route("/v1/pricing/calculate", post(get_pricing_cost))
+        .layer(from_fn_with_state(state.clone(), rate_limit_middleware));
+
+    // Billing 管理路由（需要限流）
+    let billing_routes = Router::new()
+        .route("/v1/billing/records", get(list_billing_records))
+        .route("/v1/billing/stats", get(get_billing_stats))
+        .route("/v1/billing/trigger", post(trigger_billing))
+        .route("/v1/billing/calculate", post(calculate_cost))
         .layer(from_fn_with_state(state.clone(), rate_limit_middleware));
 
     // 路由调试接口（需要限流）
@@ -54,6 +63,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(api_routes)
         .merge(pricing_routes)
+        .merge(billing_routes)
         .merge(routing_debug_routes)
         .merge(gateway_debug_routes)
         .merge(health_routes)

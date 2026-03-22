@@ -3,6 +3,7 @@
 //! AppState 定义（DB Pool, Redis, 各模块 Handle）
 
 use keycompute_auth::{ApiKeyValidator, AuthService};
+use keycompute_billing::BillingService;
 use keycompute_provider_trait::ProviderAdapter;
 use keycompute_runtime::AccountStateStore;
 use keycompute_routing::RoutingEngine;
@@ -25,8 +26,8 @@ pub struct AppState {
     pub routing: Arc<RoutingEngine>,
     /// Gateway 执行器（唯一执行层）
     pub gateway: Arc<GatewayExecutor>,
-    // TODO: 添加其他模块服务
-    // pub billing: Arc<keycompute_billing::BillingService>,
+    /// 计费服务
+    pub billing: Arc<BillingService>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -38,6 +39,7 @@ impl std::fmt::Debug for AppState {
             .field("account_states", &self.account_states)
             .field("routing", &"<RoutingEngine>")
             .field("gateway", &"<GatewayExecutor>")
+            .field("billing", &"<BillingService>")
             .finish()
     }
 }
@@ -66,6 +68,9 @@ impl AppState {
                 .build(),
         );
 
+        // 创建计费服务
+        let billing = Arc::new(BillingService::new());
+
         Self {
             auth: Arc::new(auth_service),
             rate_limiter: Arc::new(keycompute_ratelimit::RateLimitService::default_memory()),
@@ -73,6 +78,7 @@ impl AppState {
             account_states: Arc::clone(&account_states),
             routing: routing_engine,
             gateway,
+            billing,
         }
     }
 
@@ -98,6 +104,9 @@ impl AppState {
         }
         let gateway = Arc::new(builder.build());
 
+        // 创建计费服务
+        let billing = Arc::new(BillingService::new());
+
         Self {
             auth: Arc::new(auth_service),
             rate_limiter: Arc::new(keycompute_ratelimit::RateLimitService::default_memory()),
@@ -105,6 +114,7 @@ impl AppState {
             account_states: Arc::clone(&account_states),
             routing: routing_engine,
             gateway,
+            billing,
         }
     }
 }
