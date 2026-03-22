@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "packages/ui",
+    "packages/web",
+    "packages/desktop",
+    "packages/mobile",
+    "packages/api", "crates/keycompute-payment/keycompute-alipay", "crates/keycompute-payment/keycompute-wechatpay", "crates/keycompute-runtime", "crates/llm-gateway", "crates/llm-provider/keycompute-claude", "crates/llm-provider/keycompute-gemini", "crates/llm-provider/keycompute-ollama", "crates/llm-provider/keycompute-openai", "crates/keycompute-types", "crates/keycompute-db", "crates/keycompute-auth", "crates/keycompute-ratelimit", "crates/keycompute-pricing", "crates/keycompute-routing", "crates/llm-provider/keycompute-provider-trait", "crates/llm-provider/keycompute-deepseek", "crates/llm-provider/keycompute-glm", "crates/llm-provider/keycompute-minimax", "crates/keycompute-billing", "crates/keycompute-distribution", "crates/keycompute-observability",
+]
+
+[workspace.dependencies]
+dioxus = { version = "0.7.1" }
+
+# workspace
+ui = { path = "packages/ui" }
+api = { path = "packages/api" }
