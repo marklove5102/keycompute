@@ -3,7 +3,7 @@
 //! 定价模块，只读，生成 PricingSnapshot。
 //! 架构约束：不写任何状态，不参与路由或执行。
 
-use keycompute_types::{KeyComputeError, PricingSnapshot, Result};
+use keycompute_types::{PricingSnapshot, Result};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::Arc;

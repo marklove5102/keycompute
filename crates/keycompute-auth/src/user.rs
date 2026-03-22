@@ -2,7 +2,7 @@
 //!
 //! 用户和租户信息的加载与管理。
 
-use keycompute_types::{KeyComputeError, Result};
+use keycompute_types::Result;
 use uuid::Uuid;
 
 /// 用户信息

@@ -3084,6 +3084,16 @@ dependencies = [
 [[package]]
 name = "keycompute-billing"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "keycompute-db",
+ "keycompute-types",
+ "rust_decimal",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "keycompute-claude"
@@ -3112,6 +3122,16 @@ version = "0.1.0"
 [[package]]
 name = "keycompute-distribution"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "keycompute-db",
+ "keycompute-types",
+ "rust_decimal",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "keycompute-gemini"

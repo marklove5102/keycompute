@@ -1,0 +1,357 @@
+//! Usage Log 构建与写入
+//!
+//! 构建并写入 usage_logs 主账本
+
+use crate::calculator::calculate_amount;
+use crate::usage_source::UsageSource;
+use keycompute_types::{KeyComputeError, RequestContext, Result};
+use rust_decimal::Decimal;
+use uuid::Uuid;
+use chrono::{DateTime, Utc};
+
+/// 计费服务
+#[derive(Debug, Clone)]
+pub struct BillingService;
+
+impl BillingService {
+    /// 创建新的计费服务
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// 流结束后执行结算
+    ///
+    /// 输入: usage + pricing_snapshot + request metadata
+    /// 输出: 返回构建的 NewUsageLog（实际写入由调用方执行）
+    pub async fn finalize(
+        &self,
+        ctx: &RequestContext,
+        provider_name: &str,
+        account_id: Uuid,
+        status: &str,
+    ) -> Result<NewUsageLog> {
+        // 获取用量快照
+        let (input_tokens, output_tokens) = ctx.usage.snapshot();
+        let total_tokens = input_tokens + output_tokens;
+
+        // 计算用户应付金额
+        let user_amount = calculate_amount(
+            input_tokens,
+            output_tokens,
+            &ctx.pricing_snapshot,
+        );
+
+        // 确定用量来源
+        // 注意：这里简化处理，实际应该根据 Provider 是否报告了用量来决定
+        let usage_source = UsageSource::GatewayAccumulated;
+
+        let log = NewUsageLog {
+            request_id: ctx.request_id,
+            tenant_id: ctx.tenant_id,
+            user_id: ctx.user_id,
+            api_key_id: ctx.api_key_id,
+            model_name: ctx.model.clone(),
+            provider_name: provider_name.to_string(),
+            account_id,
+            input_tokens: input_tokens as i32,
+            output_tokens: output_tokens as i32,
+            total_tokens: total_tokens as i32,
+            input_unit_price_snapshot: ctx.pricing_snapshot.input_price_per_1k,
+            output_unit_price_snapshot: ctx.pricing_snapshot.output_price_per_1k,
+            user_amount,
+            currency: ctx.pricing_snapshot.currency.clone(),
+            usage_source: usage_source.as_str().to_string(),
+            status: status.to_string(),
+            started_at: ctx.started_at,
+            finished_at: Utc::now(),
+        };
+
+        tracing::info!(
+            request_id = %ctx.request_id,
+            user_amount = %user_amount,
+            "Billing finalized"
+        );
+
+        Ok(log)
+    }
+}
+
+impl Default for BillingService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 新的 Usage Log 记录
+///
+/// 对应 usage_logs 表的字段
+#[derive(Debug, Clone)]
+pub struct NewUsageLog {
+    /// 请求 ID
+    pub request_id: Uuid,
+    /// 租户 ID
+    pub tenant_id: Uuid,
+    /// 用户 ID
+    pub user_id: Uuid,
+    /// API Key ID
+    pub api_key_id: Uuid,
+    /// 模型名称
+    pub model_name: String,
+    /// Provider 名称
+    pub provider_name: String,
+    /// 账号 ID
+    pub account_id: Uuid,
+    /// 输入 token 数
+    pub input_tokens: i32,
+    /// 输出 token 数
+    pub output_tokens: i32,
+    /// 总 token 数
+    pub total_tokens: i32,
+    /// 输入单价快照（每 1k tokens）
+    pub input_unit_price_snapshot: Decimal,
+    /// 输出单价快照（每 1k tokens）
+    pub output_unit_price_snapshot: Decimal,
+    /// 用户应付金额
+    pub user_amount: Decimal,
+    /// 货币
+    pub currency: String,
+    /// 用量来源
+    pub usage_source: String,
+    /// 状态
+    pub status: String,
+    /// 开始时间
+    pub started_at: DateTime<Utc>,
+    /// 结束时间
+    pub finished_at: DateTime<Utc>,
+}
+
+impl NewUsageLog {
+    /// 创建 Builder 模式构建器
+    pub fn builder(request_id: Uuid) -> NewUsageLogBuilder {
+        NewUsageLogBuilder::new(request_id)
+    }
+}
+
+/// Usage Log 构建器
+#[derive(Debug)]
+pub struct NewUsageLogBuilder {
+    request_id: Uuid,
+    tenant_id: Option<Uuid>,
+    user_id: Option<Uuid>,
+    api_key_id: Option<Uuid>,
+    model_name: Option<String>,
+    provider_name: Option<String>,
+    account_id: Option<Uuid>,
+    input_tokens: i32,
+    output_tokens: i32,
+    input_unit_price_snapshot: Option<Decimal>,
+    output_unit_price_snapshot: Option<Decimal>,
+    user_amount: Option<Decimal>,
+    currency: String,
+    usage_source: String,
+    status: String,
+    started_at: Option<DateTime<Utc>>,
+    finished_at: Option<DateTime<Utc>>,
+}
+
+impl NewUsageLogBuilder {
+    /// 创建新的构建器
+    pub fn new(request_id: Uuid) -> Self {
+        Self {
+            request_id,
+            tenant_id: None,
+            user_id: None,
+            api_key_id: None,
+            model_name: None,
+            provider_name: None,
+            account_id: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            input_unit_price_snapshot: None,
+            output_unit_price_snapshot: None,
+            user_amount: None,
+            currency: "CNY".to_string(),
+            usage_source: "gateway_accumulated".to_string(),
+            status: "success".to_string(),
+            started_at: None,
+            finished_at: None,
+        }
+    }
+
+    /// 设置租户 ID
+    pub fn tenant_id(mut self, id: Uuid) -> Self {
+        self.tenant_id = Some(id);
+        self
+    }
+
+    /// 设置用户 ID
+    pub fn user_id(mut self, id: Uuid) -> Self {
+        self.user_id = Some(id);
+        self
+    }
+
+    /// 设置 API Key ID
+    pub fn api_key_id(mut self, id: Uuid) -> Self {
+        self.api_key_id = Some(id);
+        self
+    }
+
+    /// 设置模型名称
+    pub fn model_name(mut self, name: impl Into<String>) -> Self {
+        self.model_name = Some(name.into());
+        self
+    }
+
+    /// 设置 Provider 名称
+    pub fn provider_name(mut self, name: impl Into<String>) -> Self {
+        self.provider_name = Some(name.into());
+        self
+    }
+
+    /// 设置账号 ID
+    pub fn account_id(mut self, id: Uuid) -> Self {
+        self.account_id = Some(id);
+        self
+    }
+
+    /// 设置 token 数量
+    pub fn tokens(mut self, input: u32, output: u32) -> Self {
+        self.input_tokens = input as i32;
+        self.output_tokens = output as i32;
+        self
+    }
+
+    /// 设置价格快照
+    pub fn pricing(
+        mut self,
+        input_price: Decimal,
+        output_price: Decimal,
+        currency: impl Into<String>,
+    ) -> Self {
+        self.input_unit_price_snapshot = Some(input_price);
+        self.output_unit_price_snapshot = Some(output_price);
+        self.currency = currency.into();
+        self
+    }
+
+    /// 设置金额
+    pub fn user_amount(mut self, amount: Decimal) -> Self {
+        self.user_amount = Some(amount);
+        self
+    }
+
+    /// 设置状态
+    pub fn status(mut self, status: impl Into<String>) -> Self {
+        self.status = status.into();
+        self
+    }
+
+    /// 设置时间
+    pub fn timing(
+        mut self,
+        started_at: DateTime<Utc>,
+        finished_at: DateTime<Utc>,
+    ) -> Self {
+        self.started_at = Some(started_at);
+        self.finished_at = Some(finished_at);
+        self
+    }
+
+    /// 构建 NewUsageLog
+    pub fn build(self) -> Result<NewUsageLog> {
+        let total_tokens = self.input_tokens + self.output_tokens;
+
+        // 如果没有设置金额，自动计算
+        let user_amount = self.user_amount.unwrap_or_else(|| {
+            let input_price = self.input_unit_price_snapshot.unwrap_or_default();
+            let output_price = self.output_unit_price_snapshot.unwrap_or_default();
+            let input_cost = Decimal::from(self.input_tokens) / Decimal::from(1000) * input_price;
+            let output_cost = Decimal::from(self.output_tokens) / Decimal::from(1000) * output_price;
+            input_cost + output_cost
+        });
+
+        Ok(NewUsageLog {
+            request_id: self.request_id,
+            tenant_id: self.tenant_id.ok_or_else(|| KeyComputeError::Internal("tenant_id required".into()))?,
+            user_id: self.user_id.ok_or_else(|| KeyComputeError::Internal("user_id required".into()))?,
+            api_key_id: self.api_key_id.ok_or_else(|| KeyComputeError::Internal("api_key_id required".into()))?,
+            model_name: self.model_name.ok_or_else(|| KeyComputeError::Internal("model_name required".into()))?,
+            provider_name: self.provider_name.ok_or_else(|| KeyComputeError::Internal("provider_name required".into()))?,
+            account_id: self.account_id.ok_or_else(|| KeyComputeError::Internal("account_id required".into()))?,
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            total_tokens,
+            input_unit_price_snapshot: self.input_unit_price_snapshot.unwrap_or_default(),
+            output_unit_price_snapshot: self.output_unit_price_snapshot.unwrap_or_default(),
+            user_amount,
+            currency: self.currency,
+            usage_source: self.usage_source,
+            status: self.status,
+            started_at: self.started_at.unwrap_or_else(Utc::now),
+            finished_at: self.finished_at.unwrap_or_else(Utc::now),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn test_new_usage_log_builder() {
+        let request_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let api_key_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+        let started_at = Utc::now();
+        let finished_at = Utc::now();
+
+        let log = NewUsageLog::builder(request_id)
+            .tenant_id(tenant_id)
+            .user_id(user_id)
+            .api_key_id(api_key_id)
+            .model_name("gpt-4o")
+            .provider_name("openai")
+            .account_id(account_id)
+            .tokens(1000, 500)
+            .pricing(Decimal::from(1), Decimal::from(2), "CNY")
+            .status("success")
+            .timing(started_at, finished_at)
+            .build()
+            .unwrap();
+
+        assert_eq!(log.request_id, request_id);
+        assert_eq!(log.tenant_id, tenant_id);
+        assert_eq!(log.input_tokens, 1000);
+        assert_eq!(log.output_tokens, 500);
+        assert_eq!(log.total_tokens, 1500);
+        assert_eq!(log.currency, "CNY");
+        assert_eq!(log.status, "success");
+    }
+
+    #[test]
+    fn test_new_usage_log_builder_auto_calculate() {
+        let request_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let api_key_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+
+        let log = NewUsageLog::builder(request_id)
+            .tenant_id(tenant_id)
+            .user_id(user_id)
+            .api_key_id(api_key_id)
+            .model_name("gpt-4o")
+            .provider_name("openai")
+            .account_id(account_id)
+            .tokens(1000, 500)
+            .pricing(Decimal::from(1), Decimal::from(2), "CNY")
+            .build()
+            .unwrap();
+
+        // 1000/1000*1 + 500/1000*2 = 1 + 1 = 2
+        assert_eq!(log.user_amount, Decimal::from(2));
+    }
+}

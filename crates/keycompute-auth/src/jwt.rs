@@ -2,7 +2,7 @@
 //!
 //! 处理 JWT Token 的生成、验证和解析。
 
-use keycompute_types::{KeyComputeError, Result};
+use keycompute_types::Result;
 use uuid::Uuid;
 
 use crate::{AuthContext, Permission};
@@ -61,7 +61,7 @@ impl JwtValidator {
     }
 
     /// 验证 JWT Token
-    pub fn validate(&self, token: &str) -> Result<AuthContext> {
+    pub fn validate(&self, _token: &str) -> Result<AuthContext> {
         // TODO: 实现实际的 JWT 验证
         // 这里简化处理，仅解析模拟数据
         tracing::debug!("Validating JWT token");
