@@ -3,7 +3,10 @@
 //! Axum Router 配置，挂载所有路由
 
 use crate::{
-    handlers::{calculate_cost, chat_completions, get_pricing, health_check, list_models},
+    handlers::{
+        calculate_cost, chat_completions, debug_routing, get_pricing, get_provider_health,
+        health_check, list_models,
+    },
     middleware::{
         cors_layer, rate_limit_middleware, request_logger, trace_id_middleware,
     },
@@ -31,6 +34,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/v1/pricing/calculate", post(calculate_cost))
         .layer(from_fn_with_state(state.clone(), rate_limit_middleware));
 
+    // 路由调试接口（需要限流）
+    let routing_debug_routes = Router::new()
+        .route("/debug/routing", get(debug_routing))
+        .route("/debug/providers", get(get_provider_health))
+        .layer(from_fn_with_state(state.clone(), rate_limit_middleware));
+
     // 健康检查路由（不需要限流）
     let health_routes = Router::new().route("/health", get(health_check));
 
@@ -38,6 +47,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .merge(api_routes)
         .merge(pricing_routes)
+        .merge(routing_debug_routes)
         .merge(health_routes)
         .layer(axum::middleware::from_fn(request_logger))
         .layer(axum::middleware::from_fn(trace_id_middleware))
