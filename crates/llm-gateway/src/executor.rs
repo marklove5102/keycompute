@@ -6,8 +6,13 @@
 //! - 执行成功时调用 ProviderHealthStore::record_success
 //! - 执行失败时调用 ProviderHealthStore::record_failure
 //! - 延迟时间从请求开始计算
+//!
+//! Internal HTTP Proxy 集成：
+//! - 统一上游连接管理
+//! - 多代理出口支持
+//! - 请求追踪
 
-use crate::{GatewayConfig, streaming::StreamPipeline};
+use crate::{GatewayConfig, streaming::StreamPipeline, HttpProxy};
 use futures::StreamExt;
 use keycompute_provider_trait::{ProviderAdapter, StreamEvent, UpstreamRequest};
 use keycompute_runtime::{AccountStateStore, ProviderHealthStore};
@@ -24,10 +29,17 @@ use tokio::sync::mpsc;
 /// 2. 处理 retry 和 fallback
 /// 3. 管理 streaming 生命周期
 /// 4. 更新运行时状态（账号状态 + Provider 健康状态）
+///
+/// Internal HTTP Proxy 集成：
+/// - 统一连接池管理
+/// - 多代理出口支持
+/// - 请求追踪
 #[derive(Debug)]
 pub struct GatewayExecutor {
     config: GatewayConfig,
     providers: HashMap<String, Arc<dyn ProviderAdapter>>,
+    /// Internal HTTP Proxy（统一上游连接管理）
+    http_proxy: Option<Arc<HttpProxy>>,
 }
 
 impl GatewayExecutor {
@@ -36,7 +48,34 @@ impl GatewayExecutor {
         config: GatewayConfig,
         providers: HashMap<String, Arc<dyn ProviderAdapter>>,
     ) -> Self {
-        Self { config, providers }
+        Self {
+            config,
+            providers,
+            http_proxy: None,
+        }
+    }
+
+    /// 创建带 HTTP Proxy 的执行器
+    pub fn with_proxy(
+        config: GatewayConfig,
+        providers: HashMap<String, Arc<dyn ProviderAdapter>>,
+        http_proxy: Arc<HttpProxy>,
+    ) -> Self {
+        Self {
+            config,
+            providers,
+            http_proxy: Some(http_proxy),
+        }
+    }
+
+    /// 获取 HTTP Proxy
+    pub fn http_proxy(&self) -> Option<&Arc<HttpProxy>> {
+        self.http_proxy.as_ref()
+    }
+
+    /// 设置 HTTP Proxy
+    pub fn set_http_proxy(&mut self, proxy: Arc<HttpProxy>) {
+        self.http_proxy = Some(proxy);
     }
 
     /// 执行请求（唯一执行入口）

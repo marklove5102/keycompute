@@ -7,7 +7,7 @@ use keycompute_billing::BillingService;
 use keycompute_provider_trait::ProviderAdapter;
 use keycompute_routing::RoutingEngine;
 use keycompute_runtime::{AccountStateStore, CooldownManager, ProviderHealthStore};
-use llm_gateway::{GatewayBuilder, GatewayExecutor};
+use llm_gateway::{GatewayBuilder, GatewayExecutor, HttpProxy, ProxyConfig};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,6 +33,8 @@ pub struct AppState {
     pub routing: Arc<RoutingEngine>,
     /// Gateway 执行器（唯一执行层）
     pub gateway: Arc<GatewayExecutor>,
+    /// Internal HTTP Proxy（统一上游连接管理）
+    pub http_proxy: Arc<HttpProxy>,
     /// 计费服务
     pub billing: Arc<BillingService>,
 }
@@ -49,6 +51,7 @@ impl std::fmt::Debug for AppState {
             .field("cooldown", &"<CooldownManager>")
             .field("routing", &"<RoutingEngine>")
             .field("gateway", &"<GatewayExecutor>")
+            .field("http_proxy", &"<HttpProxy>")
             .field("billing", &"<BillingService>")
             .finish()
     }
@@ -76,12 +79,16 @@ impl AppState {
             Arc::clone(&cooldown),
         ));
 
-        // 创建 Gateway 执行器，注册所有 Provider
+        // 创建 Internal HTTP Proxy（统一上游连接管理）
+        let http_proxy = Arc::new(HttpProxy::new(ProxyConfig::default()));
+
+        // 创建 Gateway 执行器，注册所有 Provider，集成 HTTP Proxy
         let gateway = Arc::new(
             GatewayBuilder::new()
                 .add_provider("openai", Arc::new(keycompute_openai::OpenAIProvider::new()))
                 .add_provider("deepseek", Arc::new(keycompute_deepseek::DeepSeekProvider::new()))
                 .add_provider("vllm", Arc::new(keycompute_vllm::VllmProvider::new()))
+                .with_http_proxy(Arc::clone(&http_proxy))
                 .build(),
         );
 
@@ -98,6 +105,7 @@ impl AppState {
             cooldown,
             routing: routing_engine,
             gateway,
+            http_proxy,
             billing,
         }
     }
@@ -124,12 +132,16 @@ impl AppState {
             Arc::clone(&pool),
         ));
 
-        // 创建 Gateway 执行器，注册所有 Provider
+        // 创建 Internal HTTP Proxy（统一上游连接管理）
+        let http_proxy = Arc::new(HttpProxy::new(ProxyConfig::default()));
+
+        // 创建 Gateway 执行器，注册所有 Provider，集成 HTTP Proxy
         let gateway = Arc::new(
             GatewayBuilder::new()
                 .add_provider("openai", Arc::new(keycompute_openai::OpenAIProvider::new()))
                 .add_provider("deepseek", Arc::new(keycompute_deepseek::DeepSeekProvider::new()))
                 .add_provider("vllm", Arc::new(keycompute_vllm::VllmProvider::new()))
+                .with_http_proxy(Arc::clone(&http_proxy))
                 .build(),
         );
 
@@ -146,6 +158,7 @@ impl AppState {
             cooldown,
             routing: routing_engine,
             gateway,
+            http_proxy,
             billing,
         }
     }
@@ -171,8 +184,11 @@ impl AppState {
             Arc::clone(&cooldown),
         ));
 
+        // 创建 Internal HTTP Proxy
+        let http_proxy = Arc::new(HttpProxy::new(ProxyConfig::default()));
+
         // 创建 Gateway 执行器，使用自定义 Provider
-        let mut builder = GatewayBuilder::new();
+        let mut builder = GatewayBuilder::new().with_http_proxy(Arc::clone(&http_proxy));
         for (name, provider) in providers {
             builder = builder.add_provider(name, provider);
         }
@@ -191,6 +207,7 @@ impl AppState {
             cooldown,
             routing: routing_engine,
             gateway,
+            http_proxy,
             billing,
         }
     }
