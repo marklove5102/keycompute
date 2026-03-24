@@ -2,7 +2,7 @@
 //!
 //! AppState 定义（DB Pool, Redis, 各模块 Handle）
 
-use keycompute_auth::{ApiKeyValidator, AuthService};
+use keycompute_auth::{ApiKeyValidator, AuthService, JwtValidator};
 use keycompute_billing::BillingService;
 use keycompute_provider_trait::ProviderAdapter;
 use keycompute_routing::RoutingEngine;
@@ -28,6 +28,27 @@ impl Default for RateLimitBackendConfig {
     }
 }
 
+/// JWT 配置
+#[derive(Debug, Clone)]
+pub struct JwtConfig {
+    /// JWT 密钥
+    pub secret: String,
+    /// JWT 签发者
+    pub issuer: String,
+    /// JWT 过期时间（秒）
+    pub expiry_secs: i64,
+}
+
+impl Default for JwtConfig {
+    fn default() -> Self {
+        Self {
+            secret: "change-me-in-production".to_string(),
+            issuer: "keycompute".to_string(),
+            expiry_secs: 3600,
+        }
+    }
+}
+
 /// 应用状态配置
 #[derive(Debug, Clone)]
 pub struct AppStateConfig {
@@ -35,6 +56,8 @@ pub struct AppStateConfig {
     pub rate_limit: RateLimitBackendConfig,
     /// API Key 验证密钥
     pub api_key_secret: String,
+    /// JWT 配置
+    pub jwt: JwtConfig,
     /// Gateway 配置
     pub gateway: keycompute_config::GatewayConfig,
 }
@@ -44,6 +67,7 @@ impl Default for AppStateConfig {
         Self {
             rate_limit: RateLimitBackendConfig::default(),
             api_key_secret: "default-secret".to_string(),
+            jwt: JwtConfig::default(),
             gateway: keycompute_config::GatewayConfig::default(),
         }
     }
@@ -61,6 +85,11 @@ impl AppStateConfig {
                 RateLimitBackendConfig::Memory
             },
             api_key_secret: config.auth.api_key_secret.clone(),
+            jwt: JwtConfig {
+                secret: config.auth.jwt_secret.clone(),
+                issuer: config.auth.jwt_issuer.clone(),
+                expiry_secs: config.auth.jwt_expiry_secs as i64,
+            },
             gateway: config.gateway.clone(),
         }
     }
@@ -121,7 +150,11 @@ impl AppState {
     pub fn with_config(config: AppStateConfig) -> Self {
         // 创建 API Key 验证器
         let api_key_validator = ApiKeyValidator::new(&config.api_key_secret);
-        let auth_service = AuthService::new(api_key_validator);
+        // 创建 JWT 验证器
+        let jwt_validator = JwtValidator::new(&config.jwt.secret, &config.jwt.issuer)
+            .with_expiration(config.jwt.expiry_secs);
+        // 创建 AuthService，同时支持 API Key 和 JWT 认证
+        let auth_service = AuthService::new(api_key_validator).with_jwt(jwt_validator);
 
         // 创建定价服务
         let pricing_service = keycompute_pricing::PricingService::new();
@@ -244,7 +277,11 @@ impl AppState {
     pub fn with_pool_and_config(pool: Arc<PgPool>, config: AppStateConfig) -> Self {
         // 创建带数据库连接的 API Key 验证器
         let api_key_validator = ApiKeyValidator::with_pool(Arc::clone(&pool));
-        let auth_service = AuthService::new(api_key_validator);
+        // 创建 JWT 验证器
+        let jwt_validator = JwtValidator::new(&config.jwt.secret, &config.jwt.issuer)
+            .with_expiration(config.jwt.expiry_secs);
+        // 创建 AuthService，同时支持 API Key 和 JWT 认证
+        let auth_service = AuthService::new(api_key_validator).with_jwt(jwt_validator);
 
         // 创建带数据库连接的定价服务
         let pricing_service = keycompute_pricing::PricingService::with_pool(Arc::clone(&pool));
@@ -314,7 +351,11 @@ impl AppState {
     ) -> Self {
         // 创建 API Key 验证器
         let api_key_validator = ApiKeyValidator::new(&config.api_key_secret);
-        let auth_service = AuthService::new(api_key_validator);
+        // 创建 JWT 验证器
+        let jwt_validator = JwtValidator::new(&config.jwt.secret, &config.jwt.issuer)
+            .with_expiration(config.jwt.expiry_secs);
+        // 创建 AuthService，同时支持 API Key 和 JWT 认证
+        let auth_service = AuthService::new(api_key_validator).with_jwt(jwt_validator);
 
         // 创建定价服务
         let pricing_service = keycompute_pricing::PricingService::new();
