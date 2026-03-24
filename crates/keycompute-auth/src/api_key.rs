@@ -16,34 +16,25 @@ use crate::{AuthContext, Permission};
 pub struct ApiKeyValidator {
     /// 数据库连接池（可选）
     pool: Option<Arc<PgPool>>,
-    /// 密钥（用于无数据库时的回退验证）
-    secret: String,
 }
 
 impl std::fmt::Debug for ApiKeyValidator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ApiKeyValidator")
             .field("pool", &self.pool.as_ref().map(|_| "PgPool"))
-            .field("secret", &"***")
             .finish()
     }
 }
 
 impl ApiKeyValidator {
     /// 创建新的 API Key 验证器（无数据库连接）
-    pub fn new(secret: impl Into<String>) -> Self {
-        Self {
-            pool: None,
-            secret: secret.into(),
-        }
+    pub fn new() -> Self {
+        Self { pool: None }
     }
 
     /// 创建带数据库连接的验证器
     pub fn with_pool(pool: Arc<PgPool>) -> Self {
-        Self {
-            pool: Some(pool),
-            secret: String::new(),
-        }
+        Self { pool: Some(pool) }
     }
 
     /// 验证 API Key
@@ -217,7 +208,7 @@ impl ApiKeyValidator {
 
 impl Default for ApiKeyValidator {
     fn default() -> Self {
-        Self::new("default-secret")
+        Self::new()
     }
 }
 
@@ -257,14 +248,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_invalid_format() {
-        let validator = ApiKeyValidator::new("secret");
+        let validator = ApiKeyValidator::new();
         let result = validator.validate("invalid-key").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_validate_valid_format() {
-        let validator = ApiKeyValidator::new("secret");
+        let validator = ApiKeyValidator::new();
         let key = ApiKeyValidator::generate_key();
         let result = validator.validate(&key).await;
         assert!(result.is_ok());

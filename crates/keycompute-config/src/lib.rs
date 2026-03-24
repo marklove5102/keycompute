@@ -156,7 +156,6 @@ impl AppConfig {
             .set_default("auth.jwt_secret", "change-me-in-production")?
             .set_default("auth.jwt_issuer", "keycompute")?
             .set_default("auth.jwt_expiry_secs", 3600)?
-            .set_default("auth.api_key_secret", "change-me-in-production")?
             // Gateway 默认值
             .set_default("gateway.max_retries", 3)?
             .set_default("gateway.timeout_secs", 120)?

@@ -13,7 +13,7 @@ async fn test_auth_api_key_flow() {
     let mut chain = VerificationChain::new();
 
     // 1. 创建 API Key 验证器
-    let validator = ApiKeyValidator::new("test-secret");
+    let validator = ApiKeyValidator::new();
     chain.add_step(
         "keycompute-auth",
         "ApiKeyValidator::new",

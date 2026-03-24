@@ -45,8 +45,6 @@ jwt_secret = "change-me-in-production"
 jwt_issuer = "keycompute"
 # JWT 过期时间（秒）
 jwt_expiry_secs = 3600
-# API Key 密钥（生产环境必须修改！）
-api_key_secret = "change-me-in-production"
 
 # ==================== Gateway 配置 ====================
 [gateway]

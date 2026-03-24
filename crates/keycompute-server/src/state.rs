@@ -54,8 +54,6 @@ impl Default for JwtConfig {
 pub struct AppStateConfig {
     /// 限流后端配置
     pub rate_limit: RateLimitBackendConfig,
-    /// API Key 验证密钥
-    pub api_key_secret: String,
     /// JWT 配置
     pub jwt: JwtConfig,
     /// Gateway 配置
@@ -66,7 +64,6 @@ impl Default for AppStateConfig {
     fn default() -> Self {
         Self {
             rate_limit: RateLimitBackendConfig::default(),
-            api_key_secret: "default-secret".to_string(),
             jwt: JwtConfig::default(),
             gateway: keycompute_config::GatewayConfig::default(),
         }
@@ -84,7 +81,6 @@ impl AppStateConfig {
             } else {
                 RateLimitBackendConfig::Memory
             },
-            api_key_secret: config.auth.api_key_secret.clone(),
             jwt: JwtConfig {
                 secret: config.auth.jwt_secret.clone(),
                 issuer: config.auth.jwt_issuer.clone(),
@@ -149,7 +145,7 @@ impl AppState {
     /// 创建带配置的应用状态（无数据库连接）
     pub fn with_config(config: AppStateConfig) -> Self {
         // 创建 API Key 验证器
-        let api_key_validator = ApiKeyValidator::new(&config.api_key_secret);
+        let api_key_validator = ApiKeyValidator::new();
         // 创建 JWT 验证器
         let jwt_validator = JwtValidator::new(&config.jwt.secret, &config.jwt.issuer)
             .with_expiration(config.jwt.expiry_secs);
@@ -350,7 +346,7 @@ impl AppState {
         config: AppStateConfig,
     ) -> Self {
         // 创建 API Key 验证器
-        let api_key_validator = ApiKeyValidator::new(&config.api_key_secret);
+        let api_key_validator = ApiKeyValidator::new();
         // 创建 JWT 验证器
         let jwt_validator = JwtValidator::new(&config.jwt.secret, &config.jwt.issuer)
             .with_expiration(config.jwt.expiry_secs);

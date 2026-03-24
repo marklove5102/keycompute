@@ -11,8 +11,6 @@ pub struct AuthConfig {
     pub jwt_issuer: String,
     /// JWT 过期时间（秒）
     pub jwt_expiry_secs: u64,
-    /// API Key 密钥（用于生成和验证 API Key）
-    pub api_key_secret: String,
 }
 
 impl Default for AuthConfig {
@@ -21,7 +19,6 @@ impl Default for AuthConfig {
             jwt_secret: "change-me-in-production".to_string(),
             jwt_issuer: "keycompute".to_string(),
             jwt_expiry_secs: 3600,
-            api_key_secret: "change-me-in-production".to_string(),
         }
     }
 }

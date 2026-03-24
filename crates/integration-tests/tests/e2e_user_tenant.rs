@@ -365,7 +365,7 @@ async fn test_api_key_validation_flow() {
     let mut chain = VerificationChain::new();
 
     // 1. 创建验证器（无数据库）
-    let validator = ApiKeyValidator::new("test-secret");
+    let validator = ApiKeyValidator::new();
     chain.add_step(
         "keycompute-auth",
         "ApiKeyValidator::new",
@@ -423,7 +423,7 @@ async fn test_auth_service_integration() {
     let mut chain = VerificationChain::new();
 
     // 1. 创建 AuthService
-    let api_validator = ApiKeyValidator::new("test-secret");
+    let api_validator = ApiKeyValidator::new();
     let jwt_validator = JwtValidator::new("jwt-secret", "keycompute");
     let auth_service = AuthService::new(api_validator).with_jwt(jwt_validator);
 
