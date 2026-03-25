@@ -2,13 +2,18 @@
 //!
 //! 自定义中间件：认证、限流、可观测性等
 
-use crate::state::AppState;
+use crate::{
+    error::{ApiError, Result},
+    extractors::AuthExtractor,
+    state::AppState,
+};
 use axum::{
     extract::{Request, State},
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use keycompute_auth::Permission;
 use keycompute_ratelimit::RateLimitKey;
 use std::time::Instant;
 use tracing::{error, info};
@@ -139,6 +144,62 @@ pub async fn rate_limit_middleware(
             error!("Rate limit check error: {}", e);
             next.run(req).await
         }
+    }
+}
+
+/// 权限检查中间件
+///
+/// 检查用户是否具有指定的权限
+/// 管理员角色自动拥有所有权限
+pub async fn require_permission(
+    State(_state): State<AppState>,
+    auth: AuthExtractor,
+    req: Request,
+    next: Next,
+    required_permission: Permission,
+) -> Result<Response> {
+    use keycompute_auth::PermissionChecker;
+
+    // 获取用户权限列表（这里简化处理，实际应从数据库或缓存获取）
+    let user_permissions = if auth.is_admin() {
+        vec![Permission::SystemAdmin]
+    } else {
+        vec![Permission::UseApi, Permission::ViewUsage]
+    };
+
+    if !PermissionChecker::check(&auth.role, &user_permissions, &required_permission) {
+        return Err(ApiError::Auth(format!(
+            "Permission denied: requires {:?}",
+            required_permission
+        )));
+    }
+
+    Ok(next.run(req).await)
+}
+
+/// 创建权限检查中间件层
+///
+/// 使用示例：
+/// ```rust,ignore
+/// // 在路由中使用权限中间件
+/// Router::new()
+///     .route("/api/v1/users", get(list_users))
+///     .layer(from_fn_with_state(state.clone(), |state, auth, req, next| {
+///         permission_middleware(state, auth, req, next, Permission::ManageUsers)
+///     }))
+/// ```
+pub fn permission_middleware(
+    permission: Permission,
+) -> impl Fn(
+    State<AppState>,
+    AuthExtractor,
+    Request,
+    Next,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send>>
++ Clone {
+    move |state: State<AppState>, auth: AuthExtractor, req: Request, next: Next| {
+        let perm = permission.clone();
+        Box::pin(async move { require_permission(state, auth, req, next, perm).await })
     }
 }
 

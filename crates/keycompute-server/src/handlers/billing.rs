@@ -1,6 +1,9 @@
 //! Billing 管理接口
 //!
-//! 用于查询计费记录和手动触发计费结算
+//! 用于查询计费记录和费用计算
+//!
+//! 注意：根据 MVP 架构约束，Billing 仅在 stream 结束后自动触发，
+//! 不提供手动触发接口。
 
 use crate::{error::Result, extractors::AuthExtractor, state::AppState};
 use axum::{
@@ -168,51 +171,6 @@ pub async fn get_billing_stats(
     }))
 }
 
-/// 手动触发计费请求
-#[derive(Debug, Deserialize)]
-pub struct TriggerBillingRequest {
-    /// 请求 ID
-    pub request_id: Uuid,
-    /// Provider 名称
-    pub provider_name: String,
-    /// 账号 ID
-    pub account_id: Uuid,
-    /// 状态
-    pub status: String,
-}
-
-/// 手动触发计费响应
-#[derive(Debug, Serialize)]
-pub struct TriggerBillingResponse {
-    /// 是否成功
-    pub success: bool,
-    /// 记录 ID
-    pub record_id: Option<Uuid>,
-    /// 消息
-    pub message: String,
-}
-
-/// 手动触发计费（调试用）
-pub async fn trigger_billing(
-    State(_state): State<AppState>,
-    _auth: AuthExtractor,
-    Json(request): Json<TriggerBillingRequest>,
-) -> Result<Json<TriggerBillingResponse>> {
-    // TODO: 从存储中获取对应的 RequestContext 并触发计费
-    // 目前返回模拟响应
-    tracing::info!(
-        request_id = %request.request_id,
-        provider = %request.provider_name,
-        "Manual billing triggered"
-    );
-
-    Ok(Json(TriggerBillingResponse {
-        success: true,
-        record_id: Some(Uuid::new_v4()),
-        message: "Billing triggered successfully".to_string(),
-    }))
-}
-
 /// 费用计算请求
 #[derive(Debug, Deserialize)]
 pub struct CalculateCostRequest {
@@ -294,19 +252,5 @@ mod tests {
         assert_eq!(req.model, "gpt-4o");
         assert_eq!(req.input_tokens, 1000);
         assert_eq!(req.output_tokens, 500);
-    }
-
-    #[test]
-    fn test_trigger_billing_request_deserialize() {
-        let request_id = Uuid::new_v4();
-        let account_id = Uuid::new_v4();
-        let json = format!(
-            r#"{{"request_id": "{}", "provider_name": "openai", "account_id": "{}", "status": "success"}}"#,
-            request_id, account_id
-        );
-        let req: TriggerBillingRequest = serde_json::from_str(&json).unwrap();
-        assert_eq!(req.request_id, request_id);
-        assert_eq!(req.provider_name, "openai");
-        assert_eq!(req.status, "success");
     }
 }
