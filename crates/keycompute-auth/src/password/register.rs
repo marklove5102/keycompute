@@ -8,6 +8,7 @@ use chrono::{Duration, Utc};
 use keycompute_db::{
     CreateUserCredentialRequest, CreateUserRequest, EmailVerification, Tenant, User, UserCredential,
 };
+use keycompute_emailserver::EmailService;
 use keycompute_types::{KeyComputeError, Result};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,8 @@ pub struct RegistrationService {
     email_validator: EmailValidator,
     /// JWT 验证器（用于生成令牌）
     jwt_validator: Option<JwtValidator>,
+    /// 邮件服务
+    email_service: Option<EmailService>,
     /// 邮箱验证令牌有效期（小时）
     email_verification_expiry_hours: i64,
     /// 是否要求邮箱验证后才能登录
@@ -87,6 +90,7 @@ impl RegistrationService {
             password_validator: PasswordValidator::new(),
             email_validator: EmailValidator::new(),
             jwt_validator: None,
+            email_service: None,
             email_verification_expiry_hours: 24,
             require_email_verification: true,
             default_role: "user".to_string(),
@@ -96,6 +100,12 @@ impl RegistrationService {
     /// 设置 JWT 验证器
     pub fn with_jwt_validator(mut self, jwt_validator: JwtValidator) -> Self {
         self.jwt_validator = Some(jwt_validator);
+        self
+    }
+
+    /// 设置邮件服务
+    pub fn with_email_service(mut self, email_service: EmailService) -> Self {
+        self.email_service = Some(email_service);
         self
     }
 
@@ -186,7 +196,7 @@ impl RegistrationService {
             &keycompute_db::CreateEmailVerificationRequest {
                 user_id: user.id,
                 email: email.clone(),
-                token: verification_token,
+                token: verification_token.clone(),
                 expires_at,
             },
         )
@@ -194,6 +204,28 @@ impl RegistrationService {
         .map_err(|e| {
             KeyComputeError::DatabaseError(format!("Failed to create email verification: {}", e))
         })?;
+
+        // 8. 发送验证邮件
+        if let Some(email_service) = &self.email_service {
+            if let Err(e) = email_service
+                .send_verification_email(&email, &verification_token)
+                .await
+            {
+                tracing::error!(
+                    user_id = %user.id,
+                    email = %email,
+                    error = %e,
+                    "Failed to send verification email"
+                );
+                // 邮件发送失败不阻塞注册流程，用户可以重发验证邮件
+            }
+        } else {
+            tracing::warn!(
+                user_id = %user.id,
+                email = %email,
+                "Email service not configured, verification email not sent"
+            );
+        }
 
         tracing::info!(
             user_id = %user.id,
@@ -267,6 +299,23 @@ impl RegistrationService {
                 KeyComputeError::DatabaseError(format!("Failed to update credential: {}", e))
             })?;
 
+        // 发送欢迎邮件（可选）
+        if let Some(email_service) = &self.email_service {
+            // 获取用户信息
+            if let Ok(Some(user)) = User::find_by_id(&self.pool, verification.user_id).await {
+                if let Err(e) = email_service
+                    .send_welcome_email(&verification.email, user.name.as_deref())
+                    .await
+                {
+                    tracing::warn!(
+                        user_id = %verification.user_id,
+                        error = %e,
+                        "Failed to send welcome email"
+                    );
+                }
+            }
+        }
+
         tracing::info!(
             user_id = %verification.user_id,
             "Email verified successfully"
@@ -317,6 +366,24 @@ impl RegistrationService {
         .map_err(|e| {
             KeyComputeError::DatabaseError(format!("Failed to create email verification: {}", e))
         })?;
+
+        // 发送验证邮件
+        if let Some(email_service) = &self.email_service {
+            if let Err(e) = email_service
+                .send_verification_email(&email, &verification_token)
+                .await
+            {
+                tracing::error!(
+                    user_id = %user.id,
+                    email = %email,
+                    error = %e,
+                    "Failed to resend verification email"
+                );
+                return Err(KeyComputeError::AuthError(
+                    "发送验证邮件失败，请稍后重试".to_string(),
+                ));
+            }
+        }
 
         tracing::info!(
             user_id = %user.id,

@@ -7,6 +7,7 @@ use chrono::{Duration, Utc};
 use keycompute_db::{
     CreatePasswordResetRequest, PasswordReset, UpdateUserCredentialRequest, User, UserCredential,
 };
+use keycompute_emailserver::EmailService;
 use keycompute_types::{KeyComputeError, Result};
 use rand::Rng;
 use serde::Deserialize;
@@ -43,6 +44,8 @@ pub struct PasswordResetService {
     password_validator: PasswordValidator,
     /// 邮箱验证器
     email_validator: EmailValidator,
+    /// 邮件服务
+    email_service: Option<EmailService>,
     /// 重置令牌有效期（小时）
     token_expiry_hours: i64,
 }
@@ -63,8 +66,15 @@ impl PasswordResetService {
             password_hasher: PasswordHasher::new(),
             password_validator: PasswordValidator::new(),
             email_validator: EmailValidator::new(),
+            email_service: None,
             token_expiry_hours: 1, // 默认 1 小时有效期
         }
+    }
+
+    /// 设置邮件服务
+    pub fn with_email_service(mut self, email_service: EmailService) -> Self {
+        self.email_service = Some(email_service);
+        self
     }
 
     /// 设置令牌有效期
@@ -131,6 +141,24 @@ impl PasswordResetService {
         .map_err(|e| {
             KeyComputeError::DatabaseError(format!("Failed to create password reset: {}", e))
         })?;
+
+        // 5. 发送密码重置邮件
+        if let Some(email_service) = &self.email_service {
+            if let Err(e) = email_service
+                .send_password_reset_email(&email, &token)
+                .await
+            {
+                tracing::error!(
+                    user_id = %user.id,
+                    email = %email,
+                    error = %e,
+                    "Failed to send password reset email"
+                );
+                return Err(KeyComputeError::AuthError(
+                    "发送重置邮件失败，请稍后重试".to_string(),
+                ));
+            }
+        }
 
         tracing::info!(
             user_id = %user.id,

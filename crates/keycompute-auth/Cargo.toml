@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 keycompute-types = { workspace = true }
 keycompute-db = { workspace = true }
+keycompute-emailserver = { path = "../keycompute-emailserver" }
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["clock"] }
 sha2 = "0.10"

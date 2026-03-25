@@ -11,7 +11,9 @@
 //! - 环境变量：`KC__EMAIL__SMTP_HOST`、`KC__EMAIL__SMTP_PORT` 等
 //! - 配置文件：`config.toml` 中的 `[email]` 部分
 
-use keycompute_config::EmailConfig;
+// 重新导出配置类型，方便调用方使用
+pub use keycompute_config::EmailConfig;
+
 use keycompute_types::KeyComputeError;
 use lettre::{
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,

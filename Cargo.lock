@@ -3383,6 +3383,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "keycompute-db",
+ "keycompute-emailserver",
  "keycompute-types",
  "password-hash",
  "rand 0.8.5",

@@ -7,6 +7,7 @@
 //! - 用户注册服务
 //! - 用户登录服务
 //! - 密码重置服务
+//! - 邮件服务集成
 
 mod hash;
 mod login;
@@ -20,3 +21,6 @@ pub use login::{LoginRequest, LoginResponse, LoginService};
 pub use register::{RegisterRequest, RegisterResponse, RegistrationService};
 pub use reset::{PasswordResetService, RequestPasswordResetRequest, ResetPasswordRequest};
 pub use validator::{EmailValidator, PasswordValidator};
+
+// 重新导出邮件服务，方便调用方使用
+pub use keycompute_emailserver::{EmailConfig, EmailService};

@@ -10,8 +10,8 @@ pub mod user;
 
 // Password 模块重新导出
 pub use password::{
-    EmailValidator, LoginRequest, LoginResponse, LoginService, PasswordHasher,
-    PasswordResetService, PasswordValidator, RegisterRequest, RegisterResponse,
+    EmailConfig, EmailService, EmailValidator, LoginRequest, LoginResponse, LoginService,
+    PasswordHasher, PasswordResetService, PasswordValidator, RegisterRequest, RegisterResponse,
     RegistrationService, RequestPasswordResetRequest, ResetPasswordRequest,
 };
 
