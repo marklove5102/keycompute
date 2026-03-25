@@ -257,6 +257,13 @@ impl AuthService {
         // 无数据库连接时默认返回 true
         Ok(true)
     }
+
+    /// 检查是否已配置数据库连接
+    ///
+    /// 用于启动时验证配置
+    pub fn has_pool(&self) -> bool {
+        self.produce_ai_key_validator.has_pool()
+    }
 }
 
 #[cfg(test)]
@@ -303,19 +310,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_auth_service_verify_api_key() {
+    async fn test_auth_service_verify_api_key_requires_database() {
+        // 无数据库连接时，验证应该失败（安全默认行为）
         let auth_service = AuthService::new(ProduceAiKeyValidator::default());
         let key = ProduceAiKeyValidator::generate_key();
         let result = auth_service.verify_api_key(&key).await;
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not properly configured"));
     }
 
     #[tokio::test]
-    async fn test_auth_service_verify_token_api_key() {
+    async fn test_auth_service_verify_token_api_key_requires_database() {
+        // 无数据库连接时，验证应该失败（安全默认行为）
         let auth_service = AuthService::new(ProduceAiKeyValidator::default());
         let key = ProduceAiKeyValidator::generate_key();
         let result = auth_service.verify_token(&key).await;
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not properly configured"));
     }
 
     #[test]

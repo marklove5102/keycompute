@@ -1,9 +1,11 @@
 //! RateLimit 模块端到端测试
-//!
+//
 //! 验证限流模块在各场景下的行为
 
 use integration_tests::common::VerificationChain;
-use keycompute_ratelimit::{MemoryRateLimiter, RateLimitKey, RateLimitService, RateLimiter};
+use keycompute_ratelimit::{
+    MemoryRateLimiter, RateLimitConfig, RateLimitKey, RateLimitService, RateLimiter,
+};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -12,13 +14,14 @@ use uuid::Uuid;
 async fn test_ratelimit_basic_flow() {
     let mut chain = VerificationChain::new();
 
-    // 1. 创建内存限流器（参数已硬编码）
+    // 1. 创建内存限流器（使用默认配置）
+    let default_config = RateLimitConfig::default();
     let limiter = Arc::new(MemoryRateLimiter::new());
     chain.add_step(
         "keycompute-ratelimit",
         "MemoryRateLimiter::new",
-        format!("RPM limit: {}", limiter.rpm_limit()),
-        limiter.rpm_limit() == 60,
+        format!("RPM limit: {}", default_config.rpm_limit),
+        default_config.rpm_limit == 60,
     );
 
     // 2. 创建限流键
@@ -31,10 +34,13 @@ async fn test_ratelimit_basic_flow() {
     );
 
     // 3. 检查限流（应该通过）
-    let allowed = limiter.check(&key).await.unwrap();
+    let allowed = limiter
+        .check_with_config(&key, &default_config)
+        .await
+        .unwrap();
     chain.add_step(
         "keycompute-ratelimit",
-        "RateLimiter::check",
+        "RateLimiter::check_with_config",
         format!("First check allowed: {}", allowed),
         allowed,
     );
@@ -141,13 +147,28 @@ fn test_ratelimit_key_dimensions() {
 fn test_ratelimit_config_boundaries() {
     let mut chain = VerificationChain::new();
 
-    // 限流参数已硬编码为常量，验证默认行为
-    let limiter = MemoryRateLimiter::new();
+    // 验证默认配置参数
+    let config = RateLimitConfig::default();
     chain.add_step(
         "keycompute-ratelimit",
-        "MemoryRateLimiter::rpm_limit",
-        format!("RPM limit: {}", limiter.rpm_limit()),
-        limiter.rpm_limit() == 60,
+        "RateLimitConfig::default",
+        format!(
+            "RPM limit: {}, TPM limit: {}",
+            config.rpm_limit, config.tpm_limit
+        ),
+        config.rpm_limit == 60 && config.tpm_limit == 100_000,
+    );
+
+    // 验证自定义配置
+    let custom_config = RateLimitConfig::new(100, 200_000);
+    chain.add_step(
+        "keycompute-ratelimit",
+        "RateLimitConfig::new",
+        format!(
+            "Custom RPM: {}, TPM: {}",
+            custom_config.rpm_limit, custom_config.tpm_limit
+        ),
+        custom_config.rpm_limit == 100 && custom_config.tpm_limit == 200_000,
     );
 
     chain.print_report();

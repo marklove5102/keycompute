@@ -98,16 +98,18 @@ impl RoutingEngine {
     /// 生成执行计划（只读操作）
     ///
     /// 根据 RequestContext 路由到最优的 Provider 和账号
+    /// 使用租户专属账号池进行路由
     pub async fn route(&self, ctx: &RequestContext) -> Result<ExecutionPlan> {
         // Layer1: 模型路由 - 选择 provider 排序
         let ranked_providers = self
             .rank_providers(&ctx.model, &ctx.pricing_snapshot)
             .await?;
 
-        // Layer2: 账号路由 - 为每个 provider 选择最优账号
+        // Layer2: 账号路由 - 为每个 provider 选择租户专属的最优账号
         let mut targets = Vec::new();
         for provider in ranked_providers {
-            if let Some(target) = self.select_account(&provider).await? {
+            // 传入 tenant_id 确保使用租户专属账号池
+            if let Some(target) = self.select_account(&provider, ctx.tenant_id).await? {
                 targets.push(target);
             }
         }
@@ -287,11 +289,20 @@ impl RoutingEngine {
     /// 为指定 Provider 选择最优账号
     /// score = current_rpm/rpm_limit + error_rate*2
     /// 同时检查 Provider 健康状态和冷却状态
-    async fn select_account(&self, provider: &str) -> Result<Option<ExecutionTarget>> {
+    ///
+    /// # 参数
+    /// - `provider`: Provider 名称
+    /// - `tenant_id`: 租户 ID，用于选择租户专属账号池
+    async fn select_account(
+        &self,
+        provider: &str,
+        tenant_id: Uuid,
+    ) -> Result<Option<ExecutionTarget>> {
         // 首先检查 Provider 是否健康
         if !self.provider_health.is_healthy(provider) {
             tracing::warn!(
                 provider = %provider,
+                tenant_id = %tenant_id,
                 health_score = self.provider_health.get_score(provider),
                 "Provider is unhealthy, skipping"
             );
@@ -303,19 +314,24 @@ impl RoutingEngine {
             let remaining = self.cooldown.provider_cooldown_remaining(provider);
             tracing::warn!(
                 provider = %provider,
+                tenant_id = %tenant_id,
                 remaining_secs = remaining.map(|d| d.as_secs()),
                 "Provider is cooling down, skipping"
             );
             return Ok(None);
         }
 
-        // 尝试从数据库加载账号
+        // 尝试从数据库加载租户专属账号
         let accounts = if let Some(pool) = &self.pool {
-            match self.load_accounts_from_database(pool, provider).await {
+            match self
+                .load_accounts_from_database(pool, provider, tenant_id)
+                .await
+            {
                 Ok(accounts) => accounts,
                 Err(e) => {
                     tracing::warn!(
                         provider = %provider,
+                        tenant_id = %tenant_id,
                         error = %e,
                         "Failed to load accounts from database, using fallback"
                     );
@@ -331,14 +347,23 @@ impl RoutingEngine {
         self.select_best_account(provider, accounts).await
     }
 
-    /// 从数据库加载账号
+    /// 从数据库加载租户专属账号
+    ///
+    /// # 参数
+    /// - `pool`: 数据库连接池
+    /// - `provider`: Provider 名称
+    /// - `tenant_id`: 租户 ID
+    ///
+    /// # 返回
+    /// 返回该租户专属的、支持指定 provider 的启用账号列表
     async fn load_accounts_from_database(
         &self,
         pool: &PgPool,
         provider: &str,
+        tenant_id: Uuid,
     ) -> Result<Vec<Account>> {
-        // 加载所有启用的账号（不按租户过滤，因为账号池是全局的）
-        let accounts = Account::find_enabled_by_tenant(pool, uuid::Uuid::nil())
+        // 加载租户专属的启用账号
+        let accounts = Account::find_enabled_by_tenant(pool, tenant_id)
             .await
             .map_err(|e| {
                 KeyComputeError::DatabaseError(format!("Failed to load accounts: {}", e))
@@ -352,8 +377,9 @@ impl RoutingEngine {
 
         tracing::debug!(
             provider = %provider,
+            tenant_id = %tenant_id,
             count = provider_accounts.len(),
-            "Loaded accounts from database"
+            "Loaded tenant-specific accounts from database"
         );
 
         Ok(provider_accounts)

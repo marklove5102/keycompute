@@ -360,8 +360,10 @@ fn test_jwt_full_flow() {
 // ============================================================================
 
 /// 测试 Produce AI Key 验证流程（无数据库）
+///
+/// 注意：无数据库连接时，验证会失败（安全默认行为）
 #[tokio::test]
-async fn test_produce_ai_key_validation_flow() {
+async fn test_produce_ai_key_validation_flow_requires_database() {
     let mut chain = VerificationChain::new();
 
     // 1. 创建验证器（无数据库）
@@ -369,7 +371,7 @@ async fn test_produce_ai_key_validation_flow() {
     chain.add_step(
         "keycompute-auth",
         "ProduceAiKeyValidator::new",
-        "Produce AI Key validator created",
+        "Produce AI Key validator created (no database)",
         true,
     );
 
@@ -391,16 +393,27 @@ async fn test_produce_ai_key_validation_flow() {
         invalid_result.is_err(),
     );
 
-    // 4. 验证有效 Key
-    let ctx = validator.validate(&key).await.unwrap();
+    // 4. 验证有效格式的 Key（无数据库连接时应该失败）
+    let result = validator.validate(&key).await;
     chain.add_step(
         "keycompute-auth",
-        "ProduceAiKeyValidator::validate",
-        format!("Validated, user_id: {}", ctx.user_id),
-        ctx.has_permission(&Permission::UseApi),
+        "ProduceAiKeyValidator::validate (no db)",
+        "Valid format key rejected without database connection",
+        result.is_err(),
     );
 
-    // 5. 哈希测试
+    // 5. 验证错误信息
+    if let Err(e) = result {
+        let err_msg = e.to_string();
+        chain.add_step(
+            "keycompute-auth",
+            "ProduceAiKeyValidator::error_message",
+            format!("Error: {}", err_msg),
+            err_msg.contains("not properly configured"),
+        );
+    }
+
+    // 6. 哈希测试
     let hash = ProduceAiKeyValidator::hash_key(&key);
     chain.add_step(
         "keycompute-auth",
@@ -418,11 +431,14 @@ async fn test_produce_ai_key_validation_flow() {
 // ============================================================================
 
 /// 测试 AuthService 完整流程
+///
+/// 注意：无数据库连接时，API Key 验证会失败（安全默认行为）
+/// JWT 验证不需要数据库，可以正常工作
 #[tokio::test]
 async fn test_auth_service_integration() {
     let mut chain = VerificationChain::new();
 
-    // 1. 创建 AuthService
+    // 1. 创建 AuthService（无数据库连接）
     let api_validator = ProduceAiKeyValidator::new();
     let jwt_validator = JwtValidator::new("jwt-secret", "keycompute");
     let auth_service = AuthService::new(api_validator).with_jwt(jwt_validator);
@@ -430,24 +446,23 @@ async fn test_auth_service_integration() {
     chain.add_step(
         "keycompute-auth",
         "AuthService::new",
-        "AuthService created with Produce AI Key and JWT support",
+        "AuthService created with Produce AI Key and JWT support (no database)",
         true,
     );
 
-    // 2. 验证 Produce AI Key
+    // 2. 验证 Produce AI Key（无数据库连接时应该失败）
     let api_key = ProduceAiKeyValidator::generate_key();
-    let ctx = auth_service.verify_api_key(&api_key).await.unwrap();
+    let api_result = auth_service.verify_api_key(&api_key).await;
     chain.add_step(
         "keycompute-auth",
-        "AuthService::verify_api_key",
-        format!("API Key validated, role: {}", ctx.role),
-        ctx.has_permission(&Permission::UseApi),
+        "AuthService::verify_api_key (no db)",
+        "API Key rejected without database connection",
+        api_result.is_err(),
     );
 
-    // 3. 验证 JWT
+    // 3. 验证 JWT（不需要数据库）
     let user_id = Uuid::new_v4();
     let tenant_id = Uuid::new_v4();
-    // 直接使用 JwtValidator 生成 token
     let jwt_validator = JwtValidator::new("jwt-secret", "keycompute");
     let token = jwt_validator
         .generate_token(user_id, tenant_id, "user")
@@ -461,13 +476,25 @@ async fn test_auth_service_integration() {
         jwt_ctx.user_id == user_id,
     );
 
-    // 4. 自动检测 Token 类型
-    let detected_ctx = auth_service.verify_token(&api_key).await.unwrap();
+    // 4. 自动检测 Token 类型 - API Key（无数据库时应该失败）
+    let detected_result = auth_service.verify_token(&api_key).await;
     chain.add_step(
         "keycompute-auth",
-        "AuthService::verify_token",
-        format!("Auto-detected API Key, user: {}", detected_ctx.user_id),
-        true,
+        "AuthService::verify_token (API Key, no db)",
+        "API Key auto-detected and rejected without database",
+        detected_result.is_err(),
+    );
+
+    // 5. 自动检测 Token 类型 - JWT（应该成功）
+    let jwt_detected = auth_service.verify_token(&token).await.unwrap();
+    chain.add_step(
+        "keycompute-auth",
+        "AuthService::verify_token (JWT)",
+        format!(
+            "JWT auto-detected and validated, user: {}",
+            jwt_detected.user_id
+        ),
+        jwt_detected.user_id == user_id,
     );
 
     chain.print_report();

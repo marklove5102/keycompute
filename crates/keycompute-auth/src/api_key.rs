@@ -39,23 +39,67 @@ impl ProduceAiKeyValidator {
 
     /// 验证 Produce AI Key
     ///
-    /// Produce AI Key 格式: `sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+    /// Produce AI Key 格式: `sk-` + 48 个字符（与 OpenAI API Key 一致）
+    ///
+    /// 验证流程：
+    /// 1. 检查格式
+    /// 2. 从数据库查询 key hash
+    /// 3. 验证 key 有效性（未撤销、未过期）
+    /// 4. 加载用户和租户信息
+    /// 5. 验证租户状态
+    /// 6. 更新最后使用时间
     pub async fn validate(&self, key: &str) -> Result<AuthContext> {
         // 检查格式
-        if !key.starts_with("sk-") {
+        if !Self::is_valid_format(key) {
             return Err(KeyComputeError::AuthError("Invalid API key format".into()));
         }
 
         // 计算 key 的 hash
         let key_hash = Self::hash_key(key);
 
-        // 尝试从数据库验证
-        if let Some(pool) = &self.pool {
-            return self.validate_from_database(pool, &key_hash).await;
+        // 从数据库验证
+        match &self.pool {
+            Some(pool) => self.validate_from_database(pool, &key_hash).await,
+            None => {
+                // 无数据库连接时返回错误，不使用不安全的 fallback
+                tracing::error!(
+                    "API key validation attempted without database connection. \
+                     This indicates a misconfiguration. Use ProduceAiKeyValidator::with_pool() for production."
+                );
+                Err(KeyComputeError::AuthError(
+                    "Authentication service not properly configured".into(),
+                ))
+            }
+        }
+    }
+
+    /// 检查 API Key 格式是否有效
+    //
+    /// 格式要求：
+    /// - 以 `sk-` 开头
+    /// - 标准格式：sk- + 48 字符 = 51 字符（全字母数字）
+    /// - 带前缀格式：sk-{prefix}-{random}，前缀 1-27 字符，随机部分至少 20 字符
+    pub fn is_valid_format(key: &str) -> bool {
+        if !key.starts_with("sk-") {
+            return false;
         }
 
-        // 无数据库连接，使用回退逻辑
-        self.validate_fallback(&key_hash).await
+        let after_sk = &key[3..];
+
+        // 检查是否有前缀格式（包含连字符）
+        if let Some(dash_pos) = after_sk.find('-') {
+            let prefix = &after_sk[..dash_pos];
+            let rest = &after_sk[dash_pos + 1..];
+            // 前缀长度 1-27，剩余部分至少 20 字符
+            !prefix.is_empty()
+                && prefix.len() <= 27
+                && prefix.chars().all(|c| c.is_ascii_alphanumeric())
+                && rest.len() >= 20
+                && rest.chars().all(|c| c.is_ascii_alphanumeric())
+        } else {
+            // 标准格式：sk- 后面全是字母数字，总长度 51
+            key.len() == 51 && after_sk.chars().all(|c| c.is_ascii_alphanumeric())
+        }
     }
 
     /// 从数据库验证 Produce AI Key
@@ -174,24 +218,11 @@ impl ProduceAiKeyValidator {
         })
     }
 
-    /// 回退验证（无数据库时使用）
-    async fn validate_fallback(&self, key_hash: &str) -> Result<AuthContext> {
-        tracing::debug!(key_hash = %key_hash, "Validating Produce AI key (fallback mode)");
-
-        // 模拟验证成功
-        let user_id = Uuid::new_v4();
-        let tenant_id = Uuid::new_v4();
-        let produce_ai_key_id = Uuid::new_v4();
-
-        Ok(AuthContext {
-            user_id,
-            tenant_id,
-            produce_ai_key_id,
-            role: "user".to_string(),
-            permissions: vec![Permission::UseApi],
-            user_info: None,
-            tenant_info: None,
-        })
+    /// 检查是否已配置数据库连接
+    ///
+    /// 用于启动时验证配置
+    pub fn has_pool(&self) -> bool {
+        self.pool.is_some()
     }
 
     /// 计算 Produce AI Key 的 SHA256 hash
@@ -202,9 +233,52 @@ impl ProduceAiKeyValidator {
     }
 
     /// 生成新的 Produce AI Key
+    ///
+    /// 格式与 OpenAI API Key 一致：`sk-` + 48 个字符
+    /// 示例: sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     pub fn generate_key() -> String {
-        let uuid = Uuid::new_v4();
-        format!("sk-{}", uuid.to_string().replace("-", ""))
+        // 生成 48 字符的随机字符串
+        // 使用两个 UUID 来生成足够的随机字符
+        let uuid1 = Uuid::new_v4();
+        let uuid2 = Uuid::new_v4();
+        let combined = format!(
+            "{}{}",
+            uuid1.to_string().replace("-", ""),
+            uuid2.to_string().replace("-", "")
+        );
+        // 取前 48 个字符
+        format!("sk-{}", &combined[..48])
+    }
+
+    /// 生成带前缀的 Produce AI Key
+    //
+    /// 格式: `sk-{prefix}-` + 随机字符，确保随机部分至少 20 字符
+    /// 示例: sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    //
+    /// 注意：前缀长度不能超过 27 字符（因为随机部分至少需要 20 字符）
+    pub fn generate_key_with_prefix(prefix: &str) -> String {
+        let uuid1 = Uuid::new_v4();
+        let uuid2 = Uuid::new_v4();
+        let combined = format!(
+            "{}{}",
+            uuid1.to_string().replace("-", ""),
+            uuid2.to_string().replace("-", "")
+        );
+
+        // 前缀最长 27 字符（因为 48 - 1(连字符) - 27 = 20 最小随机部分）
+        let max_prefix_len = 27;
+        let prefix = if prefix.len() > max_prefix_len {
+            &prefix[..max_prefix_len]
+        } else {
+            prefix
+        };
+
+        // 计算格式：sk-{prefix}-{random}
+        // 随机部分长度 = 48 - prefix.len() - 1(连字符)
+        let random_len = 48usize.saturating_sub(prefix.len() + 1);
+        let random_part = &combined[..random_len.min(combined.len())];
+
+        format!("sk-{}-{}", prefix, random_part)
     }
 }
 
@@ -236,12 +310,53 @@ mod tests {
     fn test_generate_key() {
         let key = ProduceAiKeyValidator::generate_key();
         assert!(key.starts_with("sk-"));
-        assert_eq!(key.len(), 35); // "sk-" + 32 个字符
+        // 新格式：sk- + 48 字符 = 51 字符
+        assert_eq!(key.len(), 51, "Key should be 51 characters (sk- + 48)");
+        // 验证格式
+        assert!(ProduceAiKeyValidator::is_valid_format(&key));
+    }
+
+    #[test]
+    fn test_generate_key_with_prefix() {
+        let key = ProduceAiKeyValidator::generate_key_with_prefix("proj");
+        assert!(key.starts_with("sk-proj-"));
+        assert!(ProduceAiKeyValidator::is_valid_format(&key));
+
+        let key = ProduceAiKeyValidator::generate_key_with_prefix("test");
+        assert!(key.starts_with("sk-test-"));
+        assert!(ProduceAiKeyValidator::is_valid_format(&key));
+    }
+
+    #[test]
+    fn test_is_valid_format() {
+        // 标准格式 - 有效
+        let key = ProduceAiKeyValidator::generate_key();
+        assert!(ProduceAiKeyValidator::is_valid_format(&key));
+
+        // 带前缀格式 - 有效
+        let key_with_prefix = ProduceAiKeyValidator::generate_key_with_prefix("proj");
+        assert!(ProduceAiKeyValidator::is_valid_format(&key_with_prefix));
+
+        // 无效格式 - 不以 sk- 开头
+        assert!(!ProduceAiKeyValidator::is_valid_format("invalid-key"));
+
+        // 无效格式 - 太短
+        assert!(!ProduceAiKeyValidator::is_valid_format("sk-short"));
+
+        // 无效格式 - 包含特殊字符
+        assert!(!ProduceAiKeyValidator::is_valid_format(
+            "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx!"
+        ));
+
+        // OpenAI 格式兼容测试
+        // OpenAI key: sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        let openai_style = "sk-proj-abcdefgh12345678abcdefgh12345678abcdefgh12";
+        assert!(ProduceAiKeyValidator::is_valid_format(openai_style));
     }
 
     #[test]
     fn test_hash_key() {
-        let key = "sk-test123";
+        let key = "sk-test1234567890123456789012345678901234567890";
         let hash1 = ProduceAiKeyValidator::hash_key(key);
         let hash2 = ProduceAiKeyValidator::hash_key(key);
         assert_eq!(hash1, hash2);
@@ -256,14 +371,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_validate_valid_format() {
+    async fn test_validate_without_pool() {
+        // 无数据库连接时验证应该失败
         let validator = ProduceAiKeyValidator::new();
         let key = ProduceAiKeyValidator::generate_key();
         let result = validator.validate(&key).await;
-        assert!(result.is_ok());
+        assert!(
+            result.is_err(),
+            "Validation should fail without database connection"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("not properly configured"),
+            "Error should indicate misconfiguration"
+        );
+    }
 
-        let ctx = result.unwrap();
-        assert!(!ctx.is_admin());
-        assert!(ctx.has_permission(&Permission::UseApi));
+    #[test]
+    fn test_has_pool() {
+        let validator_without_pool = ProduceAiKeyValidator::new();
+        assert!(!validator_without_pool.has_pool());
     }
 }

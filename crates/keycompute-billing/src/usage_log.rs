@@ -332,6 +332,13 @@ impl BillingService {
 
         Ok(usage_log)
     }
+
+    /// 检查是否已配置数据库连接
+    ///
+    /// 用于启动时验证配置
+    pub fn has_pool(&self) -> bool {
+        self.pool.is_some()
+    }
 }
 
 impl Default for BillingService {

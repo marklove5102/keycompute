@@ -461,6 +461,58 @@ impl AppState {
             email_service,
         }
     }
+
+    /// 验证应用状态是否适合生产环境
+    ///
+    /// 检查必要的数据库连接是否已配置
+    ///
+    /// # 返回
+    /// - `Ok(())`: 所有检查通过
+    /// - `Err(...) )`: 缺少必要配置
+    pub fn validate_for_production(&self) -> crate::error::Result<()> {
+        let mut issues = Vec::new();
+
+        // 检查数据库连接
+        if self.pool.is_none() {
+            issues.push("Database connection pool is not configured".to_string());
+        }
+
+        // 检查 Auth 服务是否配置了数据库
+        if !self.auth.has_pool() {
+            issues.push("Auth service is not configured with database connection".to_string());
+        }
+
+        // 检查 Pricing 服务是否配置了数据库
+        if !self.pricing.has_pool() {
+            issues.push("Pricing service is not configured with database connection".to_string());
+        }
+
+        // 检查 Billing 服务是否配置了数据库
+        if !self.billing.has_pool() {
+            issues.push("Billing service is not configured with database connection".to_string());
+        }
+
+        if issues.is_empty() {
+            tracing::info!("Application state validated for production");
+            Ok(())
+        } else {
+            let error_msg = format!(
+                "Application not ready for production:\n{}",
+                issues
+                    .iter()
+                    .map(|s| format!("  - {}", s))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            tracing::error!("{}", error_msg);
+            Err(crate::error::ApiError::Config(error_msg))
+        }
+    }
+
+    /// 检查是否有数据库连接
+    pub fn has_pool(&self) -> bool {
+        self.pool.is_some()
+    }
 }
 
 impl Default for AppState {

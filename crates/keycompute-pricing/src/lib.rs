@@ -217,6 +217,13 @@ impl PricingService {
             Decimal::from(output_tokens) * pricing.output_price_per_1k / Decimal::from(1000);
         input_cost + output_cost
     }
+
+    /// 检查是否已配置数据库连接
+    ///
+    /// 用于启动时验证配置
+    pub fn has_pool(&self) -> bool {
+        self.pool.is_some()
+    }
 }
 
 #[cfg(test)]

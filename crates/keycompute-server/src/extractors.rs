@@ -148,7 +148,9 @@ mod tests {
     use axum::http::HeaderValue;
 
     #[tokio::test]
-    async fn test_auth_extractor_from_header_valid() {
+    async fn test_auth_extractor_from_header_valid_format() {
+        // 测试格式正确的 API Key（无数据库连接时会失败）
+        // 这是预期行为：生产环境需要数据库连接
         let mut headers = HeaderMap::new();
         let api_key = keycompute_auth::ProduceAiKeyValidator::generate_key();
         headers.insert(
@@ -159,7 +161,35 @@ mod tests {
         let auth_service =
             keycompute_auth::AuthService::new(keycompute_auth::ProduceAiKeyValidator::default());
         let result = AuthExtractor::from_header_with_auth(&headers, &auth_service).await;
-        assert!(result.is_ok());
+
+        // 无数据库连接时应该返回配置错误
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ApiError::Auth(_)));
+        assert!(err.to_string().contains("not properly configured"));
+    }
+
+    #[test]
+    fn test_api_key_format_validation() {
+        // 测试 API Key 格式验证
+        let api_key = keycompute_auth::ProduceAiKeyValidator::generate_key();
+        assert!(keycompute_auth::ProduceAiKeyValidator::is_valid_format(
+            &api_key
+        ));
+
+        // 测试带前缀的格式
+        let prefixed_key = keycompute_auth::ProduceAiKeyValidator::generate_key_with_prefix("proj");
+        assert!(keycompute_auth::ProduceAiKeyValidator::is_valid_format(
+            &prefixed_key
+        ));
+
+        // 测试无效格式
+        assert!(!keycompute_auth::ProduceAiKeyValidator::is_valid_format(
+            "invalid-key"
+        ));
+        assert!(!keycompute_auth::ProduceAiKeyValidator::is_valid_format(
+            "sk-short"
+        ));
     }
 
     #[tokio::test]
