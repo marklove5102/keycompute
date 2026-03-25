@@ -2,8 +2,9 @@
 //!
 //! AppState 定义（DB Pool, Redis, 各模块 Handle）
 
-use keycompute_auth::{AuthService, JwtValidator, ProduceAiKeyValidator};
+use keycompute_auth::{AuthService, EmailService, JwtValidator, ProduceAiKeyValidator};
 use keycompute_billing::BillingService;
+use keycompute_emailserver::EmailConfig;
 use keycompute_provider_trait::ProviderAdapter;
 use keycompute_routing::RoutingEngine;
 use keycompute_runtime::{
@@ -60,6 +61,8 @@ pub struct AppStateConfig {
     pub jwt: JwtConfig,
     /// Gateway 配置
     pub gateway: keycompute_config::GatewayConfig,
+    /// 邮件服务配置
+    pub email: EmailConfig,
 }
 
 impl Default for AppStateConfig {
@@ -68,6 +71,7 @@ impl Default for AppStateConfig {
             rate_limit: RateLimitBackendConfig::default(),
             jwt: JwtConfig::default(),
             gateway: keycompute_config::GatewayConfig::default(),
+            email: EmailConfig::default(),
         }
     }
 }
@@ -89,6 +93,7 @@ impl AppStateConfig {
                 expiry_secs: config.auth.jwt_expiry_secs as i64,
             },
             gateway: config.gateway.clone(),
+            email: config.email.clone(),
         }
     }
 }
@@ -152,6 +157,8 @@ pub struct AppState {
     pub http_proxy: Arc<HttpProxy>,
     /// 计费服务
     pub billing: Arc<BillingService>,
+    /// 邮件服务
+    pub email_service: Arc<EmailService>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -168,6 +175,7 @@ impl std::fmt::Debug for AppState {
             .field("gateway", &"<GatewayExecutor>")
             .field("http_proxy", &"<HttpProxy>")
             .field("billing", &"<BillingService>")
+            .field("email_service", &"<EmailService>")
             .finish()
     }
 }
@@ -230,6 +238,9 @@ impl AppState {
         // 根据配置创建限流服务
         let rate_limiter = Self::create_rate_limiter(&config.rate_limit);
 
+        // 创建邮件服务
+        let email_service = Arc::new(EmailService::new(config.email));
+
         Self {
             pool: None,
             auth: Arc::new(auth_service),
@@ -242,6 +253,7 @@ impl AppState {
             gateway,
             http_proxy,
             billing,
+            email_service,
         }
     }
 
@@ -360,6 +372,9 @@ impl AppState {
         // 根据配置创建限流服务
         let rate_limiter = Self::create_rate_limiter(&config.rate_limit);
 
+        // 创建邮件服务
+        let email_service = Arc::new(EmailService::new(config.email));
+
         Self {
             pool: Some(pool),
             auth: Arc::new(auth_service),
@@ -372,6 +387,7 @@ impl AppState {
             gateway,
             http_proxy,
             billing,
+            email_service,
         }
     }
 
@@ -427,6 +443,9 @@ impl AppState {
         // 根据配置创建限流服务
         let rate_limiter = Self::create_rate_limiter(&config.rate_limit);
 
+        // 创建邮件服务
+        let email_service = Arc::new(EmailService::new(config.email));
+
         Self {
             pool: None,
             auth: Arc::new(auth_service),
@@ -439,6 +458,7 @@ impl AppState {
             gateway,
             http_proxy,
             billing,
+            email_service,
         }
     }
 }

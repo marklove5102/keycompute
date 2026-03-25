@@ -88,7 +88,8 @@ pub async fn register_handler(
         tenant_slug: req.tenant_slug,
     };
 
-    let service = RegistrationService::new(Arc::clone(pool));
+    let service = RegistrationService::new(Arc::clone(pool))
+        .with_email_service((*state.email_service).clone());
     let response = service
         .register(&register_req)
         .await
@@ -151,7 +152,7 @@ pub async fn login_handler(
 
 /// 邮箱验证
 ///
-/// GET /auth/verify-email/:token
+/// GET /auth/verify-email/{token}
 pub async fn verify_email_handler(
     State(state): State<AppState>,
     Path(token): Path<String>,
@@ -161,7 +162,8 @@ pub async fn verify_email_handler(
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Database not configured".into()))?;
 
-    let service = RegistrationService::new(Arc::clone(pool));
+    let service = RegistrationService::new(Arc::clone(pool))
+        .with_email_service((*state.email_service).clone());
     let user_id = service
         .verify_email(&token)
         .await
@@ -188,7 +190,8 @@ pub async fn forgot_password_handler(
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Database not configured".into()))?;
 
-    let service = PasswordResetService::new(Arc::clone(pool));
+    let service = PasswordResetService::new(Arc::clone(pool))
+        .with_email_service((*state.email_service).clone());
 
     // 无论邮箱是否存在都返回成功（防止邮箱枚举攻击）
     service
@@ -327,7 +330,8 @@ pub async fn resend_verification_handler(
         .as_ref()
         .ok_or_else(|| ApiError::Internal("Database not configured".into()))?;
 
-    let service = RegistrationService::new(Arc::clone(pool));
+    let service = RegistrationService::new(Arc::clone(pool))
+        .with_email_service((*state.email_service).clone());
     service
         .resend_verification(&req.email)
         .await

@@ -3648,6 +3648,7 @@ dependencies = [
  "keycompute-db",
  "keycompute-deepseek",
  "keycompute-distribution",
+ "keycompute-emailserver",
  "keycompute-observability",
  "keycompute-ollama",
  "keycompute-openai",

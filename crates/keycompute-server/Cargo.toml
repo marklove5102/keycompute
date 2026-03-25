@@ -15,6 +15,7 @@ keycompute-billing = { workspace = true }
 keycompute-distribution = { workspace = true }
 keycompute-observability = { workspace = true }
 keycompute-config = { workspace = true }
+keycompute-emailserver = { path = "../keycompute-emailserver" }
 llm-gateway = { workspace = true }
 keycompute-provider-trait = { workspace = true }
 keycompute-openai = { workspace = true }
