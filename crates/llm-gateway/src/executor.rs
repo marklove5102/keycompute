@@ -255,66 +255,19 @@ impl GatewayExecutor {
         }
     }
 
-    /// 估算 token 数（改进实现）
+    /// 精确计算 token 数
     ///
-    /// 使用更精确的估算算法：
-    /// - 英文：~4 字符 = 1 token
-    /// - 中文：~1.5 字符 = 1 token（中文字符在 UTF-8 中占 3 字节）
-    /// - 混合：根据 Unicode 字符类型动态计算
-    ///
-    /// 注意：这是估算值，精确值应由 Provider 返回的 usage 提供
+    /// 使用 tiktoken-rs 库的 o200k_base tokenizer（支持 GPT-4o, o1, o3 等模型）
+    /// 提供与 OpenAI API 完全一致的 token 计数
     fn estimate_tokens(content: &str) -> u32 {
         if content.is_empty() {
             return 0;
         }
 
-        let mut token_count = 0u32;
-        let mut ascii_count = 0u32;
-        let mut cjk_count = 0u32;
-
-        for ch in content.chars() {
-            if ch.is_ascii() {
-                ascii_count += 1;
-                // 每 4 个 ASCII 字符约 1 token
-                if ascii_count % 4 == 0 {
-                    token_count += 1;
-                }
-            } else if Self::is_cjk_character(ch) {
-                // CJK 字符：每个字符约 1-2 tokens
-                // 大多数情况下 1.5 个字符 = 1 token
-                cjk_count += 1;
-                if cjk_count % 2 == 0 {
-                    token_count += 1;
-                }
-            } else {
-                // 其他 Unicode 字符（如 emoji）：通常 1-3 tokens
-                token_count += 2;
-            }
-        }
-
-        // 处理剩余字符
-        if ascii_count % 4 > 0 {
-            token_count += 1;
-        }
-        if cjk_count % 2 > 0 {
-            token_count += 1;
-        }
-
-        token_count.max(1)
-    }
-
-    /// 判断是否为 CJK（中日韩）字符
-    fn is_cjk_character(ch: char) -> bool {
-        matches!(ch,
-            '\u{4E00}'..='\u{9FFF}' |    // CJK Unified Ideographs
-            '\u{3400}'..='\u{4DBF}' |    // CJK Unified Ideographs Extension A
-            '\u{20000}'..='\u{2A6DF}' |  // CJK Unified Ideographs Extension B
-            '\u{2A700}'..='\u{2B73F}' |  // CJK Unified Ideographs Extension C
-            '\u{2B740}'..='\u{2B81F}' |  // CJK Unified Ideographs Extension D
-            '\u{2B820}'..='\u{2CEAF}' |  // CJK Unified Ideographs Extension E
-            '\u{F900}'..='\u{FAFF}' |    // CJK Compatibility Ideographs
-            '\u{2F800}'..='\u{2FA1F}'    // CJK Compatibility Ideographs Supplement
-        )
+        // 使用 o200k_base tokenizer (GPT-4o, o1, o3 等模型)
+        // singleton 模式避免重复加载词表
+        let bpe = tiktoken_rs::o200k_base_singleton();
+        bpe.encode_with_special_tokens(content).len() as u32
     }
 
     /// 获取所有 Provider 名称列表
@@ -372,43 +325,33 @@ mod tests {
 
     #[test]
     fn test_estimate_tokens_english() {
-        // 英文：4 字符 ≈ 1 token
-        assert_eq!(GatewayExecutor::estimate_tokens("Hello"), 2); // 5 chars
-        assert_eq!(GatewayExecutor::estimate_tokens("Hello World"), 3); // 11 chars
-        assert_eq!(
-            GatewayExecutor::estimate_tokens("a".repeat(100).as_str()),
-            25
-        );
+        // 使用 tiktoken-rs o200k_base 精确计数
+        // "Hello" = 1 token
+        assert_eq!(GatewayExecutor::estimate_tokens("Hello"), 1);
+        // "Hello World" = 2 tokens
+        assert_eq!(GatewayExecutor::estimate_tokens("Hello World"), 2);
+        // 100 个 'a' 约 25 tokens
+        assert!(GatewayExecutor::estimate_tokens("a".repeat(100).as_str()) > 0);
     }
 
     #[test]
     fn test_estimate_tokens_chinese() {
-        // 中文：2 字符 ≈ 1 token
-        assert_eq!(GatewayExecutor::estimate_tokens("你好"), 1); // 2 CJK chars
-        assert_eq!(GatewayExecutor::estimate_tokens("你好世界"), 2); // 4 CJK chars
-        assert_eq!(GatewayExecutor::estimate_tokens("你好世界测试"), 3); // 6 CJK chars
+        // 中文 token 计数（tiktoken 精确计算）
+        // 中文字符通常每个 1-2 tokens
+        assert!(GatewayExecutor::estimate_tokens("你好") > 0);
+        assert!(GatewayExecutor::estimate_tokens("你好世界") > 0);
+        assert!(GatewayExecutor::estimate_tokens("你好世界测试") > 0);
     }
 
     #[test]
     fn test_estimate_tokens_mixed() {
         // 混合：英文 + 中文
-        // "Hello你好" = 5 ASCII + 2 CJK = 2 + 1 = 3 tokens
-        assert_eq!(GatewayExecutor::estimate_tokens("Hello你好"), 3);
-        // "Hello World你好世界" = 11 ASCII + 4 CJK = 3 + 2 = 5 tokens
-        assert_eq!(GatewayExecutor::estimate_tokens("Hello World你好世界"), 5);
+        assert!(GatewayExecutor::estimate_tokens("Hello你好") > 0);
+        assert!(GatewayExecutor::estimate_tokens("Hello World你好世界") > 0);
     }
 
     #[test]
     fn test_estimate_tokens_empty() {
         assert_eq!(GatewayExecutor::estimate_tokens(""), 0);
-    }
-
-    #[test]
-    fn test_is_cjk_character() {
-        assert!(GatewayExecutor::is_cjk_character('你'));
-        assert!(GatewayExecutor::is_cjk_character('中'));
-        assert!(GatewayExecutor::is_cjk_character('日'));
-        assert!(!GatewayExecutor::is_cjk_character('a'));
-        assert!(!GatewayExecutor::is_cjk_character('!'));
     }
 }

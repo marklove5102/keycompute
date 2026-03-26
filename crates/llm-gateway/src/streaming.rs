@@ -80,9 +80,13 @@ impl StreamPipeline {
         &self.context
     }
 
-    /// 估算 token 数
+    /// 精确计算 token 数（使用 tiktoken-rs）
     fn estimate_tokens(content: &str) -> u32 {
-        ((content.len() / 4) as u32).max(1)
+        if content.is_empty() {
+            return 0;
+        }
+        let bpe = tiktoken_rs::o200k_base_singleton();
+        bpe.encode_with_special_tokens(content).len() as u32
     }
 }
 

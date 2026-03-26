@@ -377,10 +377,13 @@ fn test_routing_readonly_constraint() {
     assert!(chain.all_passed());
 }
 
-/// 辅助函数：估算 token 数
+/// 辅助函数：精确计算 token 数（使用 tiktoken-rs）
 fn estimate_tokens(text: &str) -> u32 {
-    // 简单估算：每 4 个字符约 1 个 token
-    (text.len() as u32 / 4).max(1)
+    if text.is_empty() {
+        return 0;
+    }
+    let bpe = tiktoken_rs::o200k_base_singleton();
+    bpe.encode_with_special_tokens(text).len() as u32
 }
 
 /// 测试性能基准
