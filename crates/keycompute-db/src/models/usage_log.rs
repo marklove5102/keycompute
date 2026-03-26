@@ -61,6 +61,16 @@ pub struct UsageStats {
     pub total_amount: BigDecimal,
 }
 
+/// 用户用量统计（用于用户自服务 API）
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct UserUsageStats {
+    pub total_requests: i64,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_tokens: i64,
+    pub total_cost: BigDecimal,
+}
+
 impl UsageLog {
     /// 创建用量日志
     pub async fn create(
@@ -235,6 +245,30 @@ impl UsageLog {
         .bind(user_id)
         .bind(from)
         .bind(to)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(stats)
+    }
+
+    /// 获取用户全部用量统计（不限时间范围）
+    pub async fn get_user_stats(
+        pool: &sqlx::PgPool,
+        user_id: Uuid,
+    ) -> Result<UserUsageStats, sqlx::Error> {
+        let stats = sqlx::query_as::<_, UserUsageStats>(
+            r#"
+            SELECT
+                COUNT(*) as total_requests,
+                COALESCE(SUM(input_tokens), 0)::bigint as total_input_tokens,
+                COALESCE(SUM(output_tokens), 0)::bigint as total_output_tokens,
+                COALESCE(SUM(total_tokens), 0)::bigint as total_tokens,
+                COALESCE(SUM(user_amount), 0) as total_cost
+            FROM usage_logs
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
         .fetch_one(pool)
         .await?;
 

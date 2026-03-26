@@ -17,10 +17,16 @@ use keycompute_db::models::account::{
     Account, CreateAccountRequest as DbCreateAccountRequest,
     UpdateAccountRequest as DbUpdateAccountRequest,
 };
+use keycompute_db::models::api_key::ProduceAiKey;
 use keycompute_db::models::pricing_model::{
     CreatePricingRequest, PricingModel, UpdatePricingRequest,
 };
-use keycompute_provider_trait::{DefaultHttpTransport, HttpTransport, UpstreamRequest};
+use keycompute_db::models::tenant::Tenant;
+use keycompute_db::models::user::User;
+use keycompute_db::models::user_balance::UserBalance;
+use keycompute_provider_trait::{DefaultHttpTransport, HttpTransport};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use uuid::Uuid;
@@ -48,28 +54,57 @@ pub struct AdminUserInfo {
 /// 支持查询参数：?tenant_id=xxx&role=xxx&search=xxx
 pub async fn list_all_users(
     auth: AuthExtractor,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<AdminUserInfo>>> {
     // 检查权限（简化实现，实际应使用中间件）
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
-    // 实际实现中应从数据库查询所有用户
-    let users = vec![AdminUserInfo {
-        id: Uuid::new_v4(),
-        email: "user1@example.com".to_string(),
-        name: Some("User One".to_string()),
-        role: "user".to_string(),
-        tenant_id: auth.tenant_id,
-        tenant_name: "Default Tenant".to_string(),
-        balance: 100.0,
-        is_active: true,
-        created_at: "2024-01-01T00:00:00Z".to_string(),
-        last_login_at: Some("2024-01-15T10:30:00Z".to_string()),
-    }];
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
 
-    Ok(Json(users))
+    // 查询租户下的所有用户
+    let users = User::find_by_tenant(pool, auth.tenant_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query users: {}", e)))?;
+
+    // 获取租户名称
+    let tenant = Tenant::find_by_id(pool, auth.tenant_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query tenant: {}", e)))?;
+    let tenant_name = tenant
+        .map(|t| t.name)
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let mut result = Vec::new();
+    for user in users {
+        // 获取用户余额
+        let balance = UserBalance::find_by_user(pool, user.id)
+            .await
+            .ok()
+            .flatten();
+
+        result.push(AdminUserInfo {
+            id: user.id,
+            email: user.email.clone(),
+            name: user.name.clone(),
+            role: user.role.clone(),
+            tenant_id: user.tenant_id,
+            tenant_name: tenant_name.clone(),
+            balance: balance
+                .as_ref()
+                .map(|b| b.available_balance.to_f64().unwrap_or(0.0))
+                .unwrap_or(0.0),
+            is_active: true, // TODO: 添加用户状态字段
+            created_at: user.created_at.to_rfc3339(),
+            last_login_at: None, // TODO: 添加最后登录时间
+        });
+    }
+
+    Ok(Json(result))
 }
 
 /// 获取指定用户信息
@@ -78,23 +113,50 @@ pub async fn list_all_users(
 pub async fn get_user_by_id(
     auth: AuthExtractor,
     Path(user_id): Path<Uuid>,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<AdminUserInfo>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    let user = User::find_by_id(pool, user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query user: {}", e)))?
+        .ok_or_else(|| ApiError::NotFound(format!("User not found: {}", user_id)))?;
+
+    // 获取租户名称
+    let tenant = Tenant::find_by_id(pool, user.tenant_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query tenant: {}", e)))?;
+    let tenant_name = tenant
+        .map(|t| t.name)
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    // 获取用户余额
+    let balance = UserBalance::find_by_user(pool, user.id)
+        .await
+        .ok()
+        .flatten();
+
     Ok(Json(AdminUserInfo {
-        id: user_id,
-        email: "user@example.com".to_string(),
-        name: Some("Test User".to_string()),
-        role: "user".to_string(),
-        tenant_id: auth.tenant_id,
-        tenant_name: "Default Tenant".to_string(),
-        balance: 100.0,
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        tenant_id: user.tenant_id,
+        tenant_name,
+        balance: balance
+            .as_ref()
+            .map(|b| b.available_balance.to_f64().unwrap_or(0.0))
+            .unwrap_or(0.0),
         is_active: true,
-        created_at: "2024-01-01T00:00:00Z".to_string(),
-        last_login_at: Some("2024-01-15T10:30:00Z".to_string()),
+        created_at: user.created_at.to_rfc3339(),
+        last_login_at: None,
     }))
 }
 
@@ -112,22 +174,40 @@ pub struct UpdateUserRequest {
 pub async fn update_user(
     auth: AuthExtractor,
     Path(user_id): Path<Uuid>,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<UpdateUserRequest>,
 ) -> Result<Json<serde_json::Value>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    let user = User::find_by_id(pool, user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to find user: {}", e)))?
+        .ok_or_else(|| ApiError::NotFound(format!("User not found: {}", user_id)))?;
+
+    let update_req = keycompute_db::models::user::UpdateUserRequest {
+        name: req.name,
+        role: req.role,
+    };
+
+    let updated = user
+        .update(pool, &update_req)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update user: {}", e)))?;
+
     Ok(Json(serde_json::json!({
         "success": true,
         "message": "User updated",
-        "user_id": user_id,
-        "updated_fields": {
-            "name": req.name,
-            "role": req.role,
-            "is_active": req.is_active,
-        }
+        "user_id": updated.id,
+        "email": updated.email,
+        "name": updated.name,
+        "role": updated.role,
     })))
 }
 
@@ -137,7 +217,7 @@ pub async fn update_user(
 pub async fn delete_user(
     auth: AuthExtractor,
     Path(user_id): Path<Uuid>,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
@@ -147,6 +227,20 @@ pub async fn delete_user(
     if user_id == auth.user_id {
         return Err(ApiError::BadRequest("Cannot delete yourself".to_string()));
     }
+
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    let user = User::find_by_id(pool, user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to find user: {}", e)))?
+        .ok_or_else(|| ApiError::NotFound(format!("User not found: {}", user_id)))?;
+
+    user.delete(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to delete user: {}", e)))?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -159,7 +253,7 @@ pub async fn delete_user(
 /// 更新用户余额请求
 #[derive(Debug, Deserialize)]
 pub struct UpdateBalanceRequest {
-    pub amount: f64, // 正数增加，负数减少
+    pub amount: String, // 使用字符串避免浮点精度问题
     pub reason: String,
 }
 
@@ -169,20 +263,68 @@ pub struct UpdateBalanceRequest {
 pub async fn update_user_balance(
     auth: AuthExtractor,
     Path(user_id): Path<Uuid>,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<UpdateBalanceRequest>,
 ) -> Result<Json<serde_json::Value>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    // 解析金额
+    let amount: Decimal = req
+        .amount
+        .parse()
+        .map_err(|_| ApiError::BadRequest("Invalid amount format".to_string()))?;
+
+    if amount == Decimal::ZERO {
+        return Err(ApiError::BadRequest("Amount cannot be zero".to_string()));
+    }
+
+    // 获取或创建用户余额
+    let balance = UserBalance::get_or_create(pool, auth.tenant_id, user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to get user balance: {}", e)))?;
+
+    let balance_before = balance.available_balance;
+    let balance_after = balance_before + amount;
+
+    if balance_after < Decimal::ZERO {
+        return Err(ApiError::BadRequest(
+            "Insufficient balance for this operation".to_string(),
+        ));
+    }
+
+    // 使用事务更新余额
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to begin transaction: {}", e)))?;
+
+    let (updated_balance, _transaction) = if amount > Decimal::ZERO {
+        UserBalance::recharge(&mut tx, user_id, amount, None, Some(&req.reason)).await
+    } else {
+        // 负数金额视为消费
+        UserBalance::consume(&mut tx, user_id, -amount, None, Some(&req.reason)).await
+    }
+    .map_err(|e| ApiError::Internal(format!("Failed to update balance: {}", e)))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to commit transaction: {}", e)))?;
+
     Ok(Json(serde_json::json!({
         "success": true,
         "message": "Balance updated",
         "user_id": user_id,
-        "amount": req.amount,
+        "amount": amount.to_string(),
         "reason": req.reason,
-        "new_balance": 100.0 + req.amount, // 模拟计算
+        "balance_before": balance_before.to_string(),
+        "new_balance": updated_balance.available_balance.to_string(),
         "updated_by": auth.user_id,
     })))
 }
@@ -193,22 +335,39 @@ pub async fn update_user_balance(
 pub async fn list_all_api_keys(
     auth: AuthExtractor,
     Path(user_id): Path<Uuid>,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<serde_json::Value>>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
-    let keys = vec![serde_json::json!({
-        "id": Uuid::new_v4(),
-        "user_id": user_id,
-        "name": "Default Key",
-        "key_preview": "sk-abc...",
-        "is_active": true,
-        "created_at": "2024-01-01T00:00:00Z",
-    })];
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
 
-    Ok(Json(keys))
+    let keys = ProduceAiKey::find_by_user(pool, user_id)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to fetch API keys: {}", e)))?;
+
+    let result: Vec<serde_json::Value> = keys
+        .into_iter()
+        .map(|k| {
+            serde_json::json!({
+                "id": k.id,
+                "user_id": k.user_id,
+                "name": k.name,
+                "key_preview": k.produce_ai_key_preview,
+                "is_active": !k.revoked,
+                "revoked": k.revoked,
+                "revoked_at": k.revoked_at.map(|t| t.to_rfc3339()),
+                "created_at": k.created_at.to_rfc3339(),
+                "last_used_at": k.last_used_at.map(|t| t.to_rfc3339()),
+            })
+        })
+        .collect();
+
+    Ok(Json(result))
 }
 
 // ==================== 账号/渠道管理 ====================
@@ -739,22 +898,42 @@ pub struct TenantInfo {
 /// GET /api/v1/tenants
 pub async fn list_tenants(
     auth: AuthExtractor,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<TenantInfo>>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
-    let tenants = vec![TenantInfo {
-        id: auth.tenant_id,
-        name: "Default Tenant".to_string(),
-        description: Some("System default tenant".to_string()),
-        user_count: 10,
-        is_active: true,
-        created_at: "2024-01-01T00:00:00Z".to_string(),
-    }];
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
 
-    Ok(Json(tenants))
+    let tenants = Tenant::find_all(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query tenants: {}", e)))?;
+
+    let mut result = Vec::new();
+    for tenant in tenants {
+        // 统计租户用户数量
+        let users = User::find_by_tenant(pool, tenant.id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to count users: {}", e)))?;
+
+        let is_active = tenant.is_active();
+        let description = tenant.description.clone();
+
+        result.push(TenantInfo {
+            id: tenant.id,
+            name: tenant.name,
+            description,
+            user_count: users.len() as i64,
+            is_active,
+            created_at: tenant.created_at.to_rfc3339(),
+        });
+    }
+
+    Ok(Json(result))
 }
 
 // ==================== 定价管理 ====================

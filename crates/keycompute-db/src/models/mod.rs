@@ -33,7 +33,7 @@ pub use tenant::{CreateTenantRequest, Tenant, UpdateTenantRequest};
 pub use tenant_distribution_rule::{
     CreateDistributionRuleRequest, TenantDistributionRule, UpdateDistributionRuleRequest,
 };
-pub use usage_log::{CreateUsageLogRequest, UsageLog, UsageStats};
+pub use usage_log::{CreateUsageLogRequest, UsageLog, UsageStats, UserUsageStats};
 pub use user::{CreateUserRequest, UpdateUserRequest, User};
 pub use user_balance::{BalanceTransaction, TransactionType, UserBalance};
 pub use user_credential::{

@@ -43,6 +43,7 @@ async-trait = "0.1"
 async-stream = "0.3"
 anyhow = "1.0"
 percent-encoding = "2"
+sha2 = "0.10"
 
 [features]
 default = []
