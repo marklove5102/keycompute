@@ -15,6 +15,7 @@ pub mod tables {
     pub const PAYMENT_ORDERS: &str = "payment_orders";
     pub const USER_BALANCES: &str = "user_balances";
     pub const BALANCE_TRANSACTIONS: &str = "balance_transactions";
+    pub const SYSTEM_SETTINGS: &str = "system_settings";
 }
 
 /// users 表列名
@@ -190,4 +191,16 @@ pub mod balance_transactions {
     pub const CURRENCY: &str = "currency";
     pub const DESCRIPTION: &str = "description";
     pub const CREATED_AT: &str = "created_at";
+}
+
+/// system_settings 表列名
+pub mod system_settings {
+    pub const ID: &str = "id";
+    pub const KEY: &str = "key";
+    pub const VALUE: &str = "value";
+    pub const VALUE_TYPE: &str = "value_type";
+    pub const DESCRIPTION: &str = "description";
+    pub const IS_SENSITIVE: &str = "is_sensitive";
+    pub const CREATED_AT: &str = "created_at";
+    pub const UPDATED_AT: &str = "updated_at";
 }

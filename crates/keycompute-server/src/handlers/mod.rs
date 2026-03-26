@@ -43,10 +43,14 @@ pub use user::{
 // 管理功能
 pub use admin::{
     create_account, create_pricing, delete_account, delete_pricing, delete_user,
-    get_system_settings, get_user_by_id, list_accounts, list_all_api_keys, list_all_users,
-    list_pricing, list_tenants, refresh_account, set_default_pricing, test_account, update_account,
-    update_pricing, update_system_settings, update_user, update_user_balance,
+    get_system_setting_by_key, get_system_settings, get_user_by_id, list_accounts,
+    list_all_api_keys, list_all_users, list_pricing, list_tenants, refresh_account,
+    set_default_pricing, test_account, update_account, update_pricing,
+    update_system_setting_by_key, update_system_settings, update_user, update_user_balance,
 };
+
+// 公开设置（无需认证）
+pub use admin::get_public_settings;
 
 // 定价和账单
 pub use billing::{calculate_cost, get_billing_stats, list_billing_records};

@@ -49,6 +49,9 @@ use crate::{
         get_my_usage_stats,
         get_payment_order,
         get_provider_health,
+        // 公开设置
+        get_public_settings,
+        get_system_setting_by_key,
         get_system_settings,
         get_user_by_id,
         // 健康检查
@@ -80,6 +83,7 @@ use crate::{
         update_distribution_rule,
         update_pricing,
         update_profile,
+        update_system_setting_by_key,
         update_system_settings,
         update_user,
         update_user_balance,
@@ -181,10 +185,19 @@ pub fn create_router(state: AppState) -> Router {
     let admin_tenant_routes = Router::new().route("/api/v1/tenants", get(list_tenants));
 
     // 系统设置（仅 Admin）
-    let admin_settings_routes = Router::new().route(
-        "/api/v1/settings",
-        get(get_system_settings).put(update_system_settings),
-    );
+    let admin_settings_routes = Router::new()
+        .route(
+            "/api/v1/settings",
+            get(get_system_settings).put(update_system_settings),
+        )
+        .route(
+            "/api/v1/settings/{key}",
+            get(get_system_setting_by_key).put(update_system_setting_by_key),
+        );
+
+    // 公开设置（无需认证）
+    let public_settings_routes =
+        Router::new().route("/api/v1/settings/public", get(get_public_settings));
 
     // Distribution 分销管理（仅 Admin）
     let admin_distribution_routes = Router::new()
@@ -288,6 +301,7 @@ pub fn create_router(state: AppState) -> Router {
         .merge(payment_notify_routes)
         .merge(admin_payment_routes)
         .merge(health_routes)
+        .merge(public_settings_routes) // 公开设置路由
         .layer(axum::middleware::from_fn(request_logger))
         .layer(axum::middleware::from_fn(trace_id_middleware))
         .layer(TraceLayer::new_for_http())

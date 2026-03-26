@@ -9,6 +9,7 @@ pub mod email_verification;
 pub mod password_reset;
 pub mod payment_order;
 pub mod pricing_model;
+pub mod system_setting;
 pub mod tenant;
 pub mod tenant_distribution_rule;
 pub mod usage_log;
@@ -29,6 +30,10 @@ pub use payment_order::{
     CreatePaymentOrderRequest, PaymentMethod, PaymentOrder, PaymentOrderStats, PaymentOrderStatus,
 };
 pub use pricing_model::{CreatePricingRequest, PricingModel, UpdatePricingRequest};
+pub use system_setting::{
+    BatchUpdateSettingsRequest, PublicSettings, SettingValueType, SystemSetting,
+    SystemSettingResponse, UpdateSystemSettingRequest,
+};
 pub use tenant::{CreateTenantRequest, Tenant, UpdateTenantRequest};
 pub use tenant_distribution_rule::{
     CreateDistributionRuleRequest, TenantDistributionRule, UpdateDistributionRuleRequest,

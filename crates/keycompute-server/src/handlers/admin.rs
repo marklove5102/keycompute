@@ -1273,56 +1273,295 @@ pub async fn set_default_pricing(
 
 // ==================== 系统设置 ====================
 
-/// 系统设置
+/// 系统设置（管理员视图，包含所有设置）
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SystemSettings {
+pub struct AdminSystemSettings {
+    // 站点设置
     pub site_name: String,
     pub site_description: Option<String>,
+    pub site_logo_url: Option<String>,
+    pub site_favicon_url: Option<String>,
+
+    // 注册设置
     pub allow_registration: bool,
+    pub email_verification_required: bool,
     pub default_user_quota: f64,
-    pub rate_limit_rpm: i32,
+    pub default_user_role: String,
+
+    // 限流设置
+    pub default_rpm_limit: i32,
+    pub default_tpm_limit: i32,
+
+    // 系统状态
     pub maintenance_mode: bool,
+    pub maintenance_message: Option<String>,
+
+    // 分销设置
+    pub distribution_enabled: bool,
+    pub distribution_level1_default_ratio: f64,
+    pub distribution_level2_default_ratio: f64,
+    pub distribution_min_withdraw: f64,
+
+    // 支付设置
+    pub alipay_enabled: bool,
+    pub wechatpay_enabled: bool,
+    pub min_recharge_amount: f64,
+    pub max_recharge_amount: f64,
+
+    // 安全设置
+    pub login_failed_limit: i32,
+    pub login_lockout_minutes: i32,
+    // 密码策略使用硬编码，参见 keycompute-auth/src/password/validator.rs
+
+    // 公告设置
+    pub system_notice: Option<String>,
+    pub system_notice_enabled: bool,
+
+    // 其他设置
+    pub footer_content: Option<String>,
+    pub about_content: Option<String>,
+    pub terms_of_service_url: Option<String>,
+    pub privacy_policy_url: Option<String>,
 }
 
-/// 获取系统设置
+impl AdminSystemSettings {
+    /// 从数据库设置列表构建
+    pub fn from_settings(settings: &[keycompute_db::SystemSetting]) -> Self {
+        use keycompute_db::models::system_setting::setting_keys;
+
+        let get_value = |key: &str| -> Option<String> {
+            settings
+                .iter()
+                .find(|s| s.key == key)
+                .map(|s| s.value.clone())
+        };
+
+        let get_bool = |key: &str, default: bool| -> bool {
+            settings
+                .iter()
+                .find(|s| s.key == key)
+                .map(|s| s.parse_bool())
+                .unwrap_or(default)
+        };
+
+        let get_int = |key: &str, default: i32| -> i32 {
+            settings
+                .iter()
+                .find(|s| s.key == key)
+                .map(|s| s.parse_int().unwrap_or(default))
+                .unwrap_or(default)
+        };
+
+        let get_decimal = |key: &str, default: f64| -> f64 {
+            settings
+                .iter()
+                .find(|s| s.key == key)
+                .map(|s| s.parse_decimal().unwrap_or(default))
+                .unwrap_or(default)
+        };
+
+        Self {
+            site_name: get_value(setting_keys::SITE_NAME)
+                .unwrap_or_else(|| "KeyCompute".to_string()),
+            site_description: get_value(setting_keys::SITE_DESCRIPTION),
+            site_logo_url: get_value(setting_keys::SITE_LOGO_URL),
+            site_favicon_url: get_value(setting_keys::SITE_FAVICON_URL),
+
+            allow_registration: get_bool(setting_keys::ALLOW_REGISTRATION, true),
+            email_verification_required: get_bool(setting_keys::EMAIL_VERIFICATION_REQUIRED, true),
+            default_user_quota: get_decimal(setting_keys::DEFAULT_USER_QUOTA, 10.0),
+            default_user_role: get_value(setting_keys::DEFAULT_USER_ROLE)
+                .unwrap_or_else(|| "user".to_string()),
+
+            default_rpm_limit: get_int(setting_keys::DEFAULT_RPM_LIMIT, 60),
+            default_tpm_limit: get_int(setting_keys::DEFAULT_TPM_LIMIT, 100000),
+
+            maintenance_mode: get_bool(setting_keys::MAINTENANCE_MODE, false),
+            maintenance_message: get_value(setting_keys::MAINTENANCE_MESSAGE),
+
+            distribution_enabled: get_bool(setting_keys::DISTRIBUTION_ENABLED, false),
+            distribution_level1_default_ratio: get_decimal(
+                setting_keys::DISTRIBUTION_LEVEL1_DEFAULT_RATIO,
+                0.03,
+            ),
+            distribution_level2_default_ratio: get_decimal(
+                setting_keys::DISTRIBUTION_LEVEL2_DEFAULT_RATIO,
+                0.01,
+            ),
+            distribution_min_withdraw: get_decimal(setting_keys::DISTRIBUTION_MIN_WITHDRAW, 10.0),
+
+            alipay_enabled: get_bool(setting_keys::ALIPAY_ENABLED, false),
+            wechatpay_enabled: get_bool(setting_keys::WECHATPAY_ENABLED, false),
+            min_recharge_amount: get_decimal(setting_keys::MIN_RECHARGE_AMOUNT, 1.0),
+            max_recharge_amount: get_decimal(setting_keys::MAX_RECHARGE_AMOUNT, 100000.0),
+
+            login_failed_limit: get_int(setting_keys::LOGIN_FAILED_LIMIT, 5),
+            login_lockout_minutes: get_int(setting_keys::LOGIN_LOCKOUT_MINUTES, 30),
+            // 密码策略使用硬编码
+            system_notice: get_value(setting_keys::SYSTEM_NOTICE),
+            system_notice_enabled: get_bool(setting_keys::SYSTEM_NOTICE_ENABLED, false),
+
+            footer_content: get_value(setting_keys::FOOTER_CONTENT),
+            about_content: get_value(setting_keys::ABOUT_CONTENT),
+            terms_of_service_url: get_value(setting_keys::TERMS_OF_SERVICE_URL),
+            privacy_policy_url: get_value(setting_keys::PRIVACY_POLICY_URL),
+        }
+    }
+}
+
+/// 获取系统设置（管理员）
 ///
-/// GET /api/v1/settings
+/// GET /api/v1/admin/settings
 pub async fn get_system_settings(
     auth: AuthExtractor,
-    State(_state): State<AppState>,
-) -> Result<Json<SystemSettings>> {
+    State(state): State<AppState>,
+) -> Result<Json<AdminSystemSettings>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
-    Ok(Json(SystemSettings {
-        site_name: "KeyCompute".to_string(),
-        site_description: Some("AI Gateway Platform".to_string()),
-        allow_registration: true,
-        default_user_quota: 10.0,
-        rate_limit_rpm: 60,
-        maintenance_mode: false,
-    }))
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    let settings = keycompute_db::SystemSetting::find_all(pool)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query settings: {}", e)))?;
+
+    let admin_settings = AdminSystemSettings::from_settings(&settings);
+    Ok(Json(admin_settings))
 }
 
-/// 更新系统设置
+/// 更新系统设置（管理员）
 ///
-/// PUT /api/v1/settings
+/// PUT /api/v1/admin/settings
 pub async fn update_system_settings(
     auth: AuthExtractor,
-    State(_state): State<AppState>,
-    Json(settings): Json<SystemSettings>,
+    State(state): State<AppState>,
+    Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>> {
     if !auth.is_admin() {
         return Err(ApiError::Auth("Admin permission required".to_string()));
     }
 
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    // 将 JSON 对象转换为 HashMap
+    let settings_map: std::collections::HashMap<String, String> =
+        if let serde_json::Value::Object(obj) = payload {
+            obj.into_iter()
+                .filter_map(|(k, v)| {
+                    // 将 JSON 值转换为字符串
+                    let value_str = match v {
+                        serde_json::Value::String(s) => s,
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        serde_json::Value::Null => return None,
+                        other => other.to_string(),
+                    };
+                    Some((k, value_str))
+                })
+                .collect()
+        } else {
+            return Err(ApiError::BadRequest("Invalid request body".to_string()));
+        };
+
+    // 批量更新设置
+    let updated = keycompute_db::SystemSetting::batch_update(pool, &settings_map)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update settings: {}", e)))?;
+
+    tracing::info!(
+        user_id = %auth.user_id,
+        count = updated.len(),
+        "System settings updated by admin"
+    );
+
     Ok(Json(serde_json::json!({
         "success": true,
-        "message": "Settings updated",
+        "message": format!("{} settings updated", updated.len()),
         "updated_by": auth.user_id,
-        "settings": settings,
     })))
+}
+
+/// 获取单个设置（管理员）
+///
+/// GET /api/v1/admin/settings/:key
+pub async fn get_system_setting_by_key(
+    auth: AuthExtractor,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<keycompute_db::SystemSettingResponse>> {
+    if !auth.is_admin() {
+        return Err(ApiError::Auth("Admin permission required".to_string()));
+    }
+
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    let setting = keycompute_db::SystemSetting::find_by_key(pool, &key)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to query setting: {}", e)))?
+        .ok_or_else(|| ApiError::NotFound(format!("Setting not found: {}", key)))?;
+
+    Ok(Json(setting.into()))
+}
+
+/// 更新单个设置（管理员）
+///
+/// PUT /api/v1/admin/settings/:key
+pub async fn update_system_setting_by_key(
+    auth: AuthExtractor,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(payload): Json<keycompute_db::UpdateSystemSettingRequest>,
+) -> Result<Json<keycompute_db::SystemSettingResponse>> {
+    if !auth.is_admin() {
+        return Err(ApiError::Auth("Admin permission required".to_string()));
+    }
+
+    let pool = state
+        .pool
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("Database not configured".to_string()))?;
+
+    let setting = keycompute_db::SystemSetting::update_value(pool, &key, &payload.value)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to update setting: {}", e)))?;
+
+    tracing::info!(
+        user_id = %auth.user_id,
+        key = %key,
+        "System setting updated by admin"
+    );
+
+    Ok(Json(setting.into()))
+}
+
+// ==================== 公开设置（无需认证） ====================
+
+/// 获取公开系统设置
+///
+/// GET /api/v1/settings/public
+///
+/// 返回前端需要的非敏感系统设置，无需认证
+pub async fn get_public_settings(
+    State(state): State<AppState>,
+) -> Result<Json<keycompute_db::PublicSettings>> {
+    // 如果数据库未配置，返回默认设置
+    let settings = if let Some(pool) = state.pool.as_ref() {
+        keycompute_db::SystemSetting::get_public_settings(pool).await
+    } else {
+        keycompute_db::PublicSettings::default()
+    };
+
+    Ok(Json(settings))
 }
 
 #[cfg(test)]
