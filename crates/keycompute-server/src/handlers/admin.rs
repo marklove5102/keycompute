@@ -43,7 +43,6 @@ pub struct AdminUserInfo {
     pub tenant_id: Uuid,
     pub tenant_name: String,
     pub balance: f64,
-    pub is_active: bool,
     pub created_at: String,
     pub last_login_at: Option<String>,
 }
@@ -98,9 +97,8 @@ pub async fn list_all_users(
                 .as_ref()
                 .map(|b| b.available_balance.to_f64().unwrap_or(0.0))
                 .unwrap_or(0.0),
-            is_active: true, // TODO: 添加用户状态字段
             created_at: user.created_at.to_rfc3339(),
-            last_login_at: None, // TODO: 添加最后登录时间
+            last_login_at: None,
         });
     }
 
@@ -154,7 +152,6 @@ pub async fn get_user_by_id(
             .as_ref()
             .map(|b| b.available_balance.to_f64().unwrap_or(0.0))
             .unwrap_or(0.0),
-        is_active: true,
         created_at: user.created_at.to_rfc3339(),
         last_login_at: None,
     }))
@@ -165,7 +162,6 @@ pub async fn get_user_by_id(
 pub struct UpdateUserRequest {
     pub name: Option<String>,
     pub role: Option<String>,
-    pub is_active: Option<bool>,
 }
 
 /// 更新用户信息
@@ -1343,7 +1339,6 @@ mod tests {
             tenant_id: Uuid::new_v4(),
             tenant_name: "Test".to_string(),
             balance: 1000.0,
-            is_active: true,
             created_at: "2024-01-01T00:00:00Z".to_string(),
             last_login_at: None,
         };
