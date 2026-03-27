@@ -135,7 +135,7 @@ impl RateLimiter for RedisRateLimiter {
         let unique_member = format!("{}:{}", now, Uuid::new_v4().simple());
 
         let _: () = conn
-            .zadd(&redis_key, now, &unique_member)
+            .zadd(&redis_key, &unique_member, now)
             .await
             .map_err(|e| KeyComputeError::Internal(format!("Redis error: {}", e)))?;
 
