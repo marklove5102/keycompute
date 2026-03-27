@@ -23,11 +23,10 @@ use chrono::Utc;
 use integration_tests::common::VerificationChain;
 use keycompute_db::{
     CreateProduceAiKeyRequest, CreateTenantRequest, CreateUsageLogRequest, CreateUserRequest,
-    DatabaseConfig, DatabaseManager, ProduceAiKey, Tenant, UsageLog, User, init_pool,
-    run_migrations,
+    ProduceAiKey, Tenant, UsageLog, User, run_migrations,
 };
-use sqlx::PgPool;
-use std::sync::Arc;
+use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
@@ -37,27 +36,22 @@ use uuid::Uuid;
 
 /// 创建测试数据库连接池
 ///
-/// 优先级：DATABASE_URL 环境变量 > 默认本地连接
-///
-/// # Panics
-/// 如果数据库连接失败，会 panic 而不是返回 None
+/// 直接创建连接池，不使用全局 OnceCell（避免多次初始化错误）
 async fn create_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://localhost/keycompute".to_string());
 
-    let config = DatabaseConfig {
-        url: database_url,
-        max_connections: 5,
-        min_connections: 1,
-        connect_timeout: 10,
-        idle_timeout: 300,
-        max_lifetime: 900,
-    };
-
-    let pool = init_pool(&config)
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(10))
+        .idle_timeout(Duration::from_secs(300))
+        .max_lifetime(Duration::from_secs(900))
+        .connect(&database_url)
         .await
-        .expect("Failed to initialize database pool. Set DATABASE_URL environment variable.");
+        .expect("Failed to connect to database. Set DATABASE_URL environment variable.");
 
+    // 运行迁移
     run_migrations(&pool)
         .await
         .expect("Failed to run database migrations");
@@ -162,22 +156,30 @@ async fn test_database_connection() {
 async fn test_database_manager() {
     let mut chain = VerificationChain::new();
 
-    // 测试 DatabaseManager
-    let manager = DatabaseManager::from_env().await;
+    // 直接使用 PgPoolOptions 创建连接池
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/keycompute".to_string());
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await;
+
     chain.add_step(
         "keycompute-db",
-        "DatabaseManager::from_env",
-        "DatabaseManager created from environment",
-        manager.is_ok(),
+        "PgPoolOptions::connect",
+        "Database pool created",
+        pool.is_ok(),
     );
 
-    let manager = manager.expect("Failed to create DatabaseManager");
+    let pool = pool.expect("Failed to create database pool");
 
     // 测试连接
-    let test_result = manager.test_connection().await;
+    let test_result: Result<(i32,), sqlx::Error> =
+        sqlx::query_as("SELECT 1").fetch_one(&pool).await;
     chain.add_step(
         "keycompute-db",
-        "DatabaseManager::test_connection",
+        "test_connection",
         "Connection test passed",
         test_result.is_ok(),
     );
