@@ -3197,6 +3197,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "bigdecimal",
  "bytes",
  "chrono",
  "dashmap",

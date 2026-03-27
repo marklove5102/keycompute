@@ -1,0 +1,906 @@
+//! 真实数据库集成测试
+//!
+//! 验证 PostgreSQL 数据库的完整功能：
+//! - 数据库连接与迁移
+//! - 租户 CRUD 操作
+//! - 用户 CRUD 操作
+//! - API Key CRUD 操作
+//! - UsageLog 写入与查询
+//! - 事务处理
+//! - 并发操作
+//!
+//! 运行要求：
+//! - 设置环境变量 DATABASE_URL 或创建 .env 文件
+//! - PostgreSQL 数据库已启动并可访问
+//!
+//! 运行方式：
+//! ```bash
+//! DATABASE_URL="postgres://user:pass@localhost/keycompute" cargo test --test e2e_database -- --nocapture
+//! ```
+
+use bigdecimal::BigDecimal;
+use chrono::Utc;
+use integration_tests::common::VerificationChain;
+use keycompute_db::{
+    init_pool, run_migrations, DatabaseConfig, DatabaseManager,
+    CreateTenantRequest, CreateUsageLogRequest, CreateUserRequest, CreateProduceAiKeyRequest,
+    Tenant, User, ProduceAiKey, UsageLog,
+};
+use sqlx::PgPool;
+use std::sync::Arc;
+use tokio::sync::Barrier;
+use uuid::Uuid;
+
+// ============================================================================
+// 测试辅助函数
+// ============================================================================
+
+/// 创建测试数据库连接池
+///
+/// 优先级：DATABASE_URL 环境变量 > 默认本地连接
+async fn create_test_pool() -> Option<PgPool> {
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/keycompute".to_string());
+
+    let config = DatabaseConfig {
+        url: database_url,
+        max_connections: 5,
+        min_connections: 1,
+        connect_timeout: 10,
+        idle_timeout: 300,
+        max_lifetime: 900,
+    };
+
+    match init_pool(&config).await {
+        Ok(pool) => {
+            // 运行迁移
+            if let Err(e) = run_migrations(&pool).await {
+                eprintln!("⚠️  Migration failed: {}", e);
+                return None;
+            }
+            Some(pool)
+        }
+        Err(e) => {
+            eprintln!("⚠️  Database connection failed: {}", e);
+            eprintln!("   Set DATABASE_URL environment variable to run database tests");
+            None
+        }
+    }
+}
+
+/// 清理测试数据
+async fn cleanup_test_data(pool: &PgPool) {
+    // 按依赖顺序删除
+    let _ = sqlx::query("DELETE FROM distribution_records").execute(pool).await;
+    let _ = sqlx::query("DELETE FROM usage_logs").execute(pool).await;
+    let _ = sqlx::query("DELETE FROM produce_ai_keys").execute(pool).await;
+    let _ = sqlx::query("DELETE FROM users").execute(pool).await;
+    let _ = sqlx::query("DELETE FROM tenants WHERE slug LIKE 'test-%'").execute(pool).await;
+}
+
+/// 创建测试租户
+async fn create_test_tenant(pool: &PgPool, suffix: &str) -> Tenant {
+    Tenant::create(pool, &CreateTenantRequest {
+        name: format!("Test Tenant {}", suffix),
+        slug: format!("test-tenant-{}", suffix),
+        description: Some(format!("Test tenant for {}", suffix)),
+        default_rpm_limit: Some(100),
+        default_tpm_limit: Some(50000),
+        distribution_enabled: Some(false),
+    }).await.expect("Failed to create test tenant")
+}
+
+/// 创建测试用户
+async fn create_test_user(pool: &PgPool, tenant_id: Uuid, suffix: &str) -> User {
+    User::create(pool, &CreateUserRequest {
+        tenant_id,
+        email: format!("test-{}@example.com", suffix),
+        name: Some(format!("Test User {}", suffix)),
+        role: Some("user".to_string()),
+    }).await.expect("Failed to create test user")
+}
+
+// ============================================================================
+// 数据库连接测试
+// ============================================================================
+
+/// 测试数据库连接
+#[tokio::test]
+async fn test_database_connection() {
+    let mut chain = VerificationChain::new();
+
+    // 1. 尝试连接数据库
+    let pool = create_test_pool().await;
+    chain.add_step(
+        "keycompute-db",
+        "create_test_pool",
+        "Database connection established",
+        pool.is_some(),
+    );
+
+    let Some(pool) = pool else {
+        chain.print_report();
+        println!("\n⚠️  Skipping database tests - DATABASE_URL not configured");
+        return;
+    };
+
+    // 2. 测试简单查询
+    let result: Result<(i32,), sqlx::Error> = sqlx::query_as("SELECT 1")
+        .fetch_one(&pool)
+        .await;
+    chain.add_step(
+        "keycompute-db",
+        "SELECT 1",
+        "Simple query executed",
+        result.is_ok(),
+    );
+
+    // 3. 验证表存在
+    let result: Result<(i64,), sqlx::Error> = sqlx::query_as(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'tenants'"
+    )
+    .fetch_one(&pool)
+    .await;
+    chain.add_step(
+        "keycompute-db",
+        "check_tenants_table",
+        "Tenants table exists",
+        result.map(|r| r.0 > 0).unwrap_or(false),
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "Database connection tests failed");
+}
+
+/// 测试数据库管理器
+#[tokio::test]
+async fn test_database_manager() {
+    let mut chain = VerificationChain::new();
+
+    // 测试 DatabaseManager
+    let manager = DatabaseManager::from_env().await;
+    chain.add_step(
+        "keycompute-db",
+        "DatabaseManager::from_env",
+        "DatabaseManager created from environment",
+        manager.is_ok(),
+    );
+
+    let Some(manager) = manager.ok() else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    // 测试连接
+    let test_result = manager.test_connection().await;
+    chain.add_step(
+        "keycompute-db",
+        "DatabaseManager::test_connection",
+        "Connection test passed",
+        test_result.is_ok(),
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed());
+}
+
+// ============================================================================
+// 租户 CRUD 测试
+// ============================================================================
+
+/// 测试租户 CRUD 操作
+#[tokio::test]
+async fn test_tenant_crud() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建租户
+    let tenant = create_test_tenant(&pool, "crud").await;
+    chain.add_step(
+        "keycompute-db",
+        "Tenant::create",
+        format!("Tenant created: {} ({})", tenant.name, tenant.id),
+        !tenant.id.is_nil() && tenant.status == "active",
+    );
+
+    // 2. 查找租户 (by ID)
+    let found = Tenant::find_by_id(&pool, tenant.id).await;
+    chain.add_step(
+        "keycompute-db",
+        "Tenant::find_by_id",
+        "Tenant found by ID",
+        found.is_ok() && found.as_ref().unwrap().is_some(),
+    );
+
+    // 3. 查找租户 (by slug)
+    let found_by_slug = Tenant::find_by_slug(&pool, "test-tenant-crud").await;
+    chain.add_step(
+        "keycompute-db",
+        "Tenant::find_by_slug",
+        format!("Tenant found by slug: {:?}", found_by_slug.as_ref().unwrap().as_ref().map(|t| t.name.clone())),
+        found_by_slug.is_ok() && found_by_slug.as_ref().unwrap().is_some(),
+    );
+
+    // 4. 更新租户
+    let update_req = keycompute_db::UpdateTenantRequest {
+        name: Some("Updated Test Tenant".to_string()),
+        description: Some("Updated description".to_string()),
+        status: None,
+        default_rpm_limit: Some(200),
+        default_tpm_limit: Some(100000),
+        distribution_enabled: Some(true),
+    };
+    let updated = tenant.update(&pool, &update_req).await;
+    chain.add_step(
+        "keycompute-db",
+        "Tenant::update",
+        format!("Tenant updated: {:?}", updated.as_ref().map(|t| t.name.clone())),
+        updated.is_ok() && updated.as_ref().unwrap().name == "Updated Test Tenant",
+    );
+
+    // 5. 验证更新
+    if let Ok(Some(t)) = Tenant::find_by_id(&pool, tenant.id).await {
+        chain.add_step(
+            "keycompute-db",
+            "verify_update",
+            format!("RPM: {}, TPM: {}, Distribution: {}", t.default_rpm_limit, t.default_tpm_limit, t.distribution_enabled),
+            t.default_rpm_limit == 200 && t.distribution_enabled,
+        );
+    }
+
+    // 6. 查找所有租户
+    let all = Tenant::find_all(&pool).await;
+    chain.add_step(
+        "keycompute-db",
+        "Tenant::find_all",
+        format!("Found {} tenants", all.as_ref().map(|v| v.len()).unwrap_or(0)),
+        all.is_ok(),
+    );
+
+    // 7. 删除租户
+    let delete_result = tenant.delete(&pool).await;
+    chain.add_step(
+        "keycompute-db",
+        "Tenant::delete",
+        "Tenant deleted",
+        delete_result.is_ok(),
+    );
+
+    // 8. 验证删除
+    let after_delete = Tenant::find_by_id(&pool, tenant.id).await;
+    chain.add_step(
+        "keycompute-db",
+        "verify_delete",
+        "Tenant no longer exists",
+        after_delete.map(|t| t.is_none()).unwrap_or(false),
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "Tenant CRUD tests failed");
+}
+
+// ============================================================================
+// 用户 CRUD 测试
+// ============================================================================
+
+/// 测试用户 CRUD 操作
+#[tokio::test]
+async fn test_user_crud() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建租户和用户
+    let tenant = create_test_tenant(&pool, "user-crud").await;
+    let user = create_test_user(&pool, tenant.id, "user-crud").await;
+
+    chain.add_step(
+        "keycompute-db",
+        "User::create",
+        format!("User created: {} ({})", user.email, user.id),
+        !user.id.is_nil() && user.tenant_id == tenant.id,
+    );
+
+    // 2. 查找用户 (by ID)
+    let found = User::find_by_id(&pool, user.id).await;
+    chain.add_step(
+        "keycompute-db",
+        "User::find_by_id",
+        "User found by ID",
+        found.is_ok() && found.as_ref().unwrap().is_some(),
+    );
+
+    // 3. 查找用户 (by email)
+    let found_by_email = User::find_by_email(&pool, &user.email).await;
+    chain.add_step(
+        "keycompute-db",
+        "User::find_by_email",
+        format!("User found by email: {:?}", found_by_email.as_ref().unwrap().as_ref().map(|u| u.email.clone())),
+        found_by_email.is_ok() && found_by_email.as_ref().unwrap().is_some(),
+    );
+
+    // 4. 查找租户下的用户
+    let tenant_users = User::find_by_tenant(&pool, tenant.id).await;
+    chain.add_step(
+        "keycompute-db",
+        "User::find_by_tenant",
+        format!("Found {} users in tenant", tenant_users.as_ref().map(|v| v.len()).unwrap_or(0)),
+        tenant_users.is_ok() && tenant_users.as_ref().unwrap().len() == 1,
+    );
+
+    // 5. 更新用户
+    let update_req = keycompute_db::UpdateUserRequest {
+        name: Some("Updated User Name".to_string()),
+        role: Some("admin".to_string()),
+    };
+    let updated = user.update(&pool, &update_req).await;
+    chain.add_step(
+        "keycompute-db",
+        "User::update",
+        format!("User updated: {:?}", updated.as_ref().map(|u| u.name.clone())),
+        updated.is_ok() && updated.as_ref().unwrap().name == Some("Updated User Name".to_string()),
+    );
+
+    // 6. 删除用户
+    let delete_result = user.delete(&pool).await;
+    chain.add_step(
+        "keycompute-db",
+        "User::delete",
+        "User deleted",
+        delete_result.is_ok(),
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "User CRUD tests failed");
+}
+
+// ============================================================================
+// API Key 测试
+// ============================================================================
+
+/// 测试 API Key 操作
+#[tokio::test]
+async fn test_api_key_operations() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建租户和用户
+    let tenant = create_test_tenant(&pool, "apikey").await;
+    let user = create_test_user(&pool, tenant.id, "apikey").await;
+
+    // 2. 创建 API Key
+    let key_hash = format!("hash-{}", Uuid::new_v4().simple());
+    let api_key = ProduceAiKey::create(&pool, &CreateProduceAiKeyRequest {
+        tenant_id: tenant.id,
+        user_id: user.id,
+        name: "Test API Key".to_string(),
+        produce_ai_key_hash: key_hash.clone(),
+        produce_ai_key_preview: "sk-test-****".to_string(),
+        expires_at: None,
+    }).await;
+
+    chain.add_step(
+        "keycompute-db",
+        "ProduceAiKey::create",
+        format!("API Key created: {:?}", api_key.as_ref().map(|k| k.id)),
+        api_key.is_ok(),
+    );
+
+    let Ok(api_key) = api_key else {
+        chain.print_report();
+        return;
+    };
+
+    // 3. 查找 API Key (by hash)
+    let found = ProduceAiKey::find_by_hash(&pool, &key_hash).await;
+    chain.add_step(
+        "keycompute-db",
+        "ProduceAiKey::find_by_hash",
+        "API Key found by hash",
+        found.is_ok() && found.as_ref().unwrap().is_some(),
+    );
+
+    // 4. 验证 API Key 有效
+    let found_key = ProduceAiKey::find_by_hash(&pool, &key_hash).await;
+    let is_valid = found_key.as_ref().map(|k| k.as_ref().map(|k| k.is_valid()).unwrap_or(false)).unwrap_or(false);
+    chain.add_step(
+        "keycompute-db",
+        "ProduceAiKey::is_valid",
+        format!("API Key is valid: {}", is_valid),
+        is_valid,
+    );
+
+    // 5. 撤销 API Key
+    let revoked = api_key.revoke(&pool).await;
+    chain.add_step(
+        "keycompute-db",
+        "ProduceAiKey::revoke",
+        "API Key revoked",
+        revoked.is_ok(),
+    );
+
+    // 6. 验证撤销后无效
+    let revoked_key = ProduceAiKey::find_by_hash(&pool, &key_hash).await;
+    let is_valid_after = revoked_key.as_ref().map(|k| k.as_ref().map(|k| k.is_valid()).unwrap_or(true)).unwrap_or(true);
+    chain.add_step(
+        "keycompute-db",
+        "verify_revoked",
+        "Revoked API Key is invalid",
+        !is_valid_after,
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "API Key tests failed");
+}
+
+// ============================================================================
+// UsageLog 测试
+// ============================================================================
+
+/// 测试 UsageLog 操作
+#[tokio::test]
+async fn test_usage_log_operations() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建测试数据
+    let tenant = create_test_tenant(&pool, "usage").await;
+    let user = create_test_user(&pool, tenant.id, "usage").await;
+    let key_hash = format!("hash-usage-{}", Uuid::new_v4().simple());
+    let api_key = ProduceAiKey::create(&pool, &CreateProduceAiKeyRequest {
+        tenant_id: tenant.id,
+        user_id: user.id,
+        name: "Usage Test Key".to_string(),
+        produce_ai_key_hash: key_hash.clone(),
+        produce_ai_key_preview: "sk-test-****".to_string(),
+        expires_at: None,
+    }).await.expect("Failed to create API key");
+
+    // 2. 创建 UsageLog
+    let request_id = Uuid::new_v4();
+    let now = Utc::now();
+    let usage_log = UsageLog::create(&pool, &CreateUsageLogRequest {
+        request_id,
+        tenant_id: tenant.id,
+        user_id: user.id,
+        produce_ai_key_id: api_key.id,
+        model_name: "gpt-4o".to_string(),
+        provider_name: "openai".to_string(),
+        account_id: Uuid::new_v4(),
+        input_tokens: 1000,
+        output_tokens: 500,
+        input_unit_price_snapshot: BigDecimal::from(1),
+        output_unit_price_snapshot: BigDecimal::from(2),
+        user_amount: BigDecimal::from(2), // (1000*1 + 500*2) / 1000
+        currency: "CNY".to_string(),
+        usage_source: "gateway_accumulated".to_string(),
+        status: "success".to_string(),
+        started_at: now - chrono::Duration::seconds(5),
+        finished_at: now,
+    }).await;
+
+    chain.add_step(
+        "keycompute-db",
+        "UsageLog::create",
+        format!("UsageLog created: {:?}", usage_log.as_ref().map(|l| l.id)),
+        usage_log.is_ok(),
+    );
+
+    let Ok(usage_log) = usage_log else {
+        chain.print_report();
+        return;
+    };
+
+    // 3. 验证字段
+    chain.add_step(
+        "keycompute-db",
+        "verify_usage_log_fields",
+        format!("Input: {}, Output: {}, Total: {}", usage_log.input_tokens, usage_log.output_tokens, usage_log.total_tokens),
+        usage_log.input_tokens == 1000 && usage_log.output_tokens == 500 && usage_log.total_tokens == 1500,
+    );
+
+    // 4. 查找 UsageLog (by request_id)
+    let found = UsageLog::find_by_request_id(&pool, request_id).await;
+    chain.add_step(
+        "keycompute-db",
+        "UsageLog::find_by_request_id",
+        "UsageLog found by request_id",
+        found.is_ok() && found.as_ref().unwrap().is_some(),
+    );
+
+    // 5. 查找租户的 UsageLog
+    let tenant_logs = UsageLog::find_by_tenant(&pool, tenant.id, 100, 0).await;
+    chain.add_step(
+        "keycompute-db",
+        "UsageLog::find_by_tenant",
+        format!("Found {} logs for tenant", tenant_logs.as_ref().map(|v| v.len()).unwrap_or(0)),
+        tenant_logs.is_ok() && tenant_logs.as_ref().unwrap().len() == 1,
+    );
+
+    // 6. 获取租户统计
+    let stats = UsageLog::get_stats_by_tenant(
+        &pool,
+        tenant.id,
+        now - chrono::Duration::hours(1),
+        now + chrono::Duration::hours(1),
+    ).await;
+    chain.add_step(
+        "keycompute-db",
+        "UsageLog::get_stats_by_tenant",
+        format!("Stats: {:?} requests", stats.as_ref().map(|s| s.total_requests)),
+        stats.is_ok() && stats.as_ref().unwrap().total_requests == 1,
+    );
+
+    // 7. 获取用户统计
+    let user_stats = UsageLog::get_user_stats(&pool, user.id).await;
+    chain.add_step(
+        "keycompute-db",
+        "UsageLog::get_user_stats",
+        format!("User stats: {:?} requests, {:?} tokens",
+            user_stats.as_ref().map(|s| s.total_requests),
+            user_stats.as_ref().map(|s| s.total_tokens)
+        ),
+        user_stats.is_ok() && user_stats.as_ref().unwrap().total_requests == 1,
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "UsageLog tests failed");
+}
+
+// ============================================================================
+// 多租户隔离测试
+// ============================================================================
+
+/// 测试多租户数据隔离
+#[tokio::test]
+async fn test_multi_tenant_isolation() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建两个租户
+    let tenant1 = create_test_tenant(&pool, "isolation-1").await;
+    let tenant2 = create_test_tenant(&pool, "isolation-2").await;
+
+    chain.add_step(
+        "keycompute-db",
+        "create_two_tenants",
+        format!("Created tenants: {} and {}", tenant1.name, tenant2.name),
+        tenant1.id != tenant2.id,
+    );
+
+    // 2. 每个租户创建用户
+    let user1 = create_test_user(&pool, tenant1.id, "isolation-1").await;
+    let user2 = create_test_user(&pool, tenant2.id, "isolation-2").await;
+
+    chain.add_step(
+        "keycompute-db",
+        "create_users_in_tenants",
+        format!("User1 in tenant1: {}, User2 in tenant2: {}", user1.tenant_id, user2.tenant_id),
+        user1.tenant_id == tenant1.id && user2.tenant_id == tenant2.id,
+    );
+
+    // 3. 验证租户用户隔离
+    let tenant1_users = User::find_by_tenant(&pool, tenant1.id).await;
+    let tenant2_users = User::find_by_tenant(&pool, tenant2.id).await;
+
+    chain.add_step(
+        "keycompute-db",
+        "verify_tenant_isolation",
+        format!("Tenant1: {} users, Tenant2: {} users",
+            tenant1_users.as_ref().map(|v| v.len()).unwrap_or(0),
+            tenant2_users.as_ref().map(|v| v.len()).unwrap_or(0)
+        ),
+        tenant1_users.as_ref().map(|v| v.len() == 1).unwrap_or(false) &&
+        tenant2_users.as_ref().map(|v| v.len() == 1).unwrap_or(false),
+    );
+
+    // 4. 验证跨租户访问被阻止
+    // 用户1不应该出现在租户2的用户列表中
+    let tenant2_has_user1 = tenant2_users
+        .map(|users| users.iter().any(|u| u.id == user1.id))
+        .unwrap_or(false);
+
+    chain.add_step(
+        "keycompute-db",
+        "verify_cross_tenant_blocked",
+        "Cross-tenant access blocked",
+        !tenant2_has_user1,
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "Multi-tenant isolation tests failed");
+}
+
+// ============================================================================
+// 并发操作测试
+// ============================================================================
+
+/// 测试并发数据库操作
+#[tokio::test]
+async fn test_concurrent_operations() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建租户
+    let tenant = create_test_tenant(&pool, "concurrent").await;
+    let pool = Arc::new(pool);
+    let tenant_id = tenant.id;
+
+    // 2. 并发创建用户
+    let barrier = Arc::new(Barrier::new(10));
+    let mut handles = Vec::new();
+
+    for i in 0..10 {
+        let pool_clone = Arc::clone(&pool);
+        let barrier_clone = Arc::clone(&barrier);
+        let tenant_id = tenant_id;
+
+        handles.push(tokio::spawn(async move {
+            barrier_clone.wait().await;
+
+            let email = format!("concurrent-{}-{}@example.com", i, Uuid::new_v4().simple());
+            User::create(&pool_clone, &CreateUserRequest {
+                tenant_id,
+                email,
+                name: Some(format!("Concurrent User {}", i)),
+                role: Some("user".to_string()),
+            }).await
+        }));
+    }
+
+    // 3. 等待所有操作完成
+    let results: Vec<_> = futures::future::join_all(handles).await;
+
+    let success_count = results.iter().filter(|r| r.is_ok() && r.as_ref().unwrap().is_ok()).count();
+    chain.add_step(
+        "keycompute-db",
+        "concurrent_user_creation",
+        format!("Created {} users concurrently (10 attempted)", success_count),
+        success_count == 10,
+    );
+
+    // 4. 验证所有用户存在
+    let all_users = User::find_by_tenant(&pool, tenant_id).await;
+    chain.add_step(
+        "keycompute-db",
+        "verify_concurrent_users",
+        format!("Found {} users in tenant", all_users.as_ref().map(|v| v.len()).unwrap_or(0)),
+        all_users.map(|v| v.len() == 10).unwrap_or(false),
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "Concurrent operations tests failed");
+}
+
+// ============================================================================
+// 事务测试
+// ============================================================================
+
+/// 测试数据库事务
+#[tokio::test]
+async fn test_database_transaction() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 测试事务提交
+    let tenant_id = {
+        let mut tx = pool.begin().await.expect("Failed to begin transaction");
+
+        let tenant = sqlx::query_as::<_, Tenant>(
+            "INSERT INTO tenants (name, slug) VALUES ($1, $2) RETURNING *"
+        )
+        .bind("Transaction Test Tenant")
+        .bind("test-tx-tenant")
+        .fetch_one(&mut *tx)
+        .await;
+
+        chain.add_step(
+            "keycompute-db",
+            "transaction_insert",
+            "Insert in transaction",
+            tenant.is_ok(),
+        );
+
+        // 提交事务
+        tx.commit().await.expect("Failed to commit transaction");
+
+        tenant.unwrap().id
+    };
+
+    // 验证提交后数据存在
+    let found = Tenant::find_by_id(&pool, tenant_id).await;
+    chain.add_step(
+        "keycompute-db",
+        "verify_committed",
+        "Data exists after commit",
+        found.map(|t| t.is_some()).unwrap_or(false),
+    );
+
+    // 2. 测试事务回滚
+    {
+        let mut tx = pool.begin().await.expect("Failed to begin transaction");
+
+        let _ = sqlx::query(
+            "INSERT INTO tenants (name, slug) VALUES ($1, $2)"
+        )
+        .bind("Rollback Test Tenant")
+        .bind("test-rollback-tenant")
+        .execute(&mut *tx)
+        .await;
+
+        // 回滚事务
+        tx.rollback().await.expect("Failed to rollback transaction");
+    }
+
+    // 验证回滚后数据不存在
+    let found = Tenant::find_by_slug(&pool, "test-rollback-tenant").await;
+    chain.add_step(
+        "keycompute-db",
+        "verify_rolled_back",
+        "Data does not exist after rollback",
+        found.map(|t| t.is_none()).unwrap_or(false),
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "Transaction tests failed");
+}
+
+// ============================================================================
+// 完整业务链路测试
+// ============================================================================
+
+/// 测试完整的业务链路：租户 -> 用户 -> API Key -> UsageLog
+#[tokio::test]
+async fn test_full_business_chain() {
+    let mut chain = VerificationChain::new();
+
+    let Some(pool) = create_test_pool().await else {
+        chain.print_report();
+        println!("\n⚠️  Skipping - DATABASE_URL not configured");
+        return;
+    };
+
+    cleanup_test_data(&pool).await;
+
+    // 1. 创建租户
+    let tenant = create_test_tenant(&pool, "full-chain").await;
+    chain.add_step(
+        "keycompute-db",
+        "step1_tenant",
+        format!("Tenant: {} ({})", tenant.name, tenant.id),
+        tenant.is_active(),
+    );
+
+    // 2. 创建用户
+    let user = create_test_user(&pool, tenant.id, "full-chain").await;
+    chain.add_step(
+        "keycompute-db",
+        "step2_user",
+        format!("User: {} ({})", user.email, user.id),
+        user.tenant_id == tenant.id,
+    );
+
+    // 3. 创建 API Key
+    let key_hash = format!("hash-full-chain-{}", Uuid::new_v4().simple());
+    let api_key = ProduceAiKey::create(&pool, &CreateProduceAiKeyRequest {
+        tenant_id: tenant.id,
+        user_id: user.id,
+        name: "Full Chain Test Key".to_string(),
+        produce_ai_key_hash: key_hash.clone(),
+        produce_ai_key_preview: "sk-fc-****".to_string(),
+        expires_at: None,
+    }).await.expect("Failed to create API key");
+
+    chain.add_step(
+        "keycompute-db",
+        "step3_api_key",
+        format!("API Key: {} ({})", api_key.name, api_key.id),
+        !api_key.revoked,
+    );
+
+    // 4. 创建 UsageLog
+    let request_id = Uuid::new_v4();
+    let now = Utc::now();
+    let usage_log = UsageLog::create(&pool, &CreateUsageLogRequest {
+        request_id,
+        tenant_id: tenant.id,
+        user_id: user.id,
+        produce_ai_key_id: api_key.id,
+        model_name: "gpt-4o".to_string(),
+        provider_name: "openai".to_string(),
+        account_id: Uuid::new_v4(),
+        input_tokens: 2000,
+        output_tokens: 1000,
+        input_unit_price_snapshot: BigDecimal::from(5),
+        output_unit_price_snapshot: BigDecimal::from(15),
+        user_amount: BigDecimal::from(25), // (2000*5 + 1000*15) / 1000
+        currency: "CNY".to_string(),
+        usage_source: "provider_reported".to_string(),
+        status: "success".to_string(),
+        started_at: now - chrono::Duration::seconds(10),
+        finished_at: now,
+    }).await.expect("Failed to create usage log");
+
+    chain.add_step(
+        "keycompute-db",
+        "step4_usage_log",
+        format!("UsageLog: {} tokens, {} amount", usage_log.total_tokens, usage_log.user_amount),
+        usage_log.total_tokens == 3000,
+    );
+
+    // 5. 验证完整链路可追溯
+    // 通过 request_id 找到 UsageLog -> 找到 User -> 找到 Tenant
+    let found_log = UsageLog::find_by_request_id(&pool, request_id)
+        .await
+        .expect("Failed to find log")
+        .expect("Log not found");
+
+    let found_user = User::find_by_id(&pool, found_log.user_id)
+        .await
+        .expect("Failed to find user")
+        .expect("User not found");
+
+    let found_tenant = Tenant::find_by_id(&pool, found_user.tenant_id)
+        .await
+        .expect("Failed to find tenant")
+        .expect("Tenant not found");
+
+    chain.add_step(
+        "keycompute-db",
+        "step5_traceability",
+        format!("Traced: {} -> {} -> {}", found_tenant.name, found_user.email, found_log.model_name),
+        found_tenant.id == tenant.id && found_user.id == user.id && found_log.id == usage_log.id,
+    );
+
+    chain.print_report();
+    assert!(chain.all_passed(), "Full business chain tests failed");
+}
