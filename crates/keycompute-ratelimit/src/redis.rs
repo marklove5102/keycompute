@@ -8,6 +8,7 @@ use keycompute_types::{KeyComputeError, Result};
 use redis::{AsyncCommands, Client};
 use std::sync::Arc;
 use std::time::Duration;
+use uuid::Uuid;
 
 /// Redis 限流器
 ///
@@ -130,8 +131,11 @@ impl RateLimiter for RedisRateLimiter {
             .unwrap()
             .as_secs() as i64;
 
+        // 使用 UUID 作为唯一成员，避免同一秒内的请求被去重
+        let unique_member = format!("{}:{}", now, Uuid::new_v4().simple());
+
         let _: () = conn
-            .zadd(&redis_key, now, now)
+            .zadd(&redis_key, now, &unique_member)
             .await
             .map_err(|e| KeyComputeError::Internal(format!("Redis error: {}", e)))?;
 
