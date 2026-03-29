@@ -44,9 +44,26 @@ pub fn App() -> Element {
 }
 
 /// 带 AppShell 侧边栏布局的页面外壳
+/// 内含路由守卫：未登录时自动跳转到登录页
 #[component]
 pub fn AppLayout() -> Element {
     let user_store = use_context::<UserStore>();
+    let auth_store = use_context::<AuthStore>();
+    let nav = use_navigator();
+
+    // 路由守卫：未登录时重定向到登录页
+    // 延迟执行以避免在渲染期间立即导航（Dioxus 禁止路由守卫范式）
+    use_effect(move || {
+        if !auth_store.is_authenticated() {
+            nav.push(Route::Login {});
+        }
+    });
+
+    // 认证状态未就绪时（没有 token）不渲染内容
+    if !auth_store.is_authenticated() {
+        return rsx! {};
+    }
+
     let is_admin = user_store.is_admin();
     let user_name = user_store
         .info

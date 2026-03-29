@@ -26,7 +26,7 @@ impl AuthState {
 }
 
 /// 认证状态 Store（对外暴露的 Signal 封装）
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct AuthStore {
     pub state: Signal<AuthState>,
 }

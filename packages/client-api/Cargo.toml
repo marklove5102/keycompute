@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 # HTTP 客户端（支持 WASM 目标）
-reqwest = { version = "0.12", features = ["json"] }
+# default-features = false 禁用 native TLS（openssl），确保 WASM 可编译
+# features: json=JSON支持, rustls-tls=native 环境使用 rustls
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }

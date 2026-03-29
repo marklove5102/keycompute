@@ -19,6 +19,18 @@ pub async fn update_all(
         .await
 }
 
+/// 更新单个设置项
+pub async fn update_by_key(
+    key: &str,
+    value: &serde_json::Value,
+    token: &str,
+) -> Result<SettingValue> {
+    let client = get_client();
+    SettingsApi::new(&client)
+        .update_system_setting_by_key(key, value, token)
+        .await
+}
+
 pub async fn get_public() -> Result<HashMap<String, SettingValue>> {
     let client = get_client();
     SettingsApi::new(&client).get_public_settings().await

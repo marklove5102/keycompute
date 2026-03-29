@@ -25,7 +25,6 @@ pub fn Settings() -> Element {
         settings_service::get_all(&token).await
     });
 
-    let mut _saving = use_signal(|| false);
     let save_error = use_signal(String::new);
     let save_ok = use_signal(|| false);
 
@@ -89,10 +88,10 @@ pub fn Settings() -> Element {
                     }
                     div { class: "card-body",
                         div { class: "settings-grid",
-                            SettingItem { label: "平台名称", value: platform_name.clone(), editable: is_admin }
-                            SettingItem { label: "注册模式", value: register_mode.clone(), editable: is_admin }
-                            SettingItem { label: "默认货币", value: currency.clone(), editable: is_admin }
-                            SettingItem { label: "最低充値金额", value: min_recharge.clone(), editable: is_admin }
+                            SettingItem { label: "平台名称", setting_key: "platform_name", value: platform_name.clone(), editable: is_admin, auth_store, save_ok, save_error }
+                            SettingItem { label: "注册模式", setting_key: "register_mode", value: register_mode.clone(), editable: is_admin, auth_store, save_ok, save_error }
+                            SettingItem { label: "默认货币", setting_key: "default_currency", value: currency.clone(), editable: is_admin, auth_store, save_ok, save_error }
+                            SettingItem { label: "最低充值金额", setting_key: "min_recharge_amount", value: min_recharge.clone(), editable: is_admin, auth_store, save_ok, save_error }
                         }
                     }
                 }
@@ -104,8 +103,8 @@ pub fn Settings() -> Element {
                     }
                     div { class: "card-body",
                         div { class: "settings-grid",
-                            SettingItem { label: "JWT Token 有效期（小时）", value: jwt_expire.clone(), editable: is_admin }
-                            SettingItem { label: "邮筱验证", value: email_verify.clone(), editable: is_admin }
+                            SettingItem { label: "JWT Token 有效期（小时）", setting_key: "jwt_expire_hours", value: jwt_expire.clone(), editable: is_admin, auth_store, save_ok, save_error }
+                            SettingItem { label: "邮箱验证", setting_key: "email_verification", value: email_verify.clone(), editable: is_admin, auth_store, save_ok, save_error }
                         }
                     }
                 }
@@ -117,8 +116,41 @@ pub fn Settings() -> Element {
 // ── 内部组件
 
 #[component]
-fn SettingItem(label: String, value: String, editable: bool) -> Element {
+fn SettingItem(
+    label: String,
+    /// 后端 setting key
+    setting_key: String,
+    value: String,
+    editable: bool,
+    auth_store: AuthStore,
+    mut save_ok: Signal<bool>,
+    mut save_error: Signal<String>,
+) -> Element {
     let mut edit_val = use_signal(|| value.clone());
+    let mut saving = use_signal(|| false);
+
+    let key = setting_key.clone();
+    let on_save = move |_| {
+        let val = edit_val();
+        let k = key.clone();
+        let token = auth_store.token().unwrap_or_default();
+        *saving.write() = true;
+        *save_ok.write() = false;
+        *save_error.write() = String::new();
+        spawn(async move {
+            let json_val = serde_json::Value::String(val);
+            match settings_service::update_by_key(&k, &json_val, &token).await {
+                Ok(_) => {
+                    *save_ok.write() = true;
+                    *saving.write() = false;
+                }
+                Err(e) => {
+                    *save_error.write() = format!("保存 {} 失败：{}", k, e);
+                    *saving.write() = false;
+                }
+            }
+        });
+    };
 
     rsx! {
         div { class: "setting-item",
@@ -133,8 +165,9 @@ fn SettingItem(label: String, value: String, editable: bool) -> Element {
                     Button {
                         variant: ButtonVariant::Secondary,
                         size: ui::ButtonSize::Small,
-                        onclick: move |_| {},
-                        "保存"
+                        loading: saving(),
+                        onclick: on_save,
+                        if saving() { "保存中..." } else { "保存" }
                     }
                 }
             } else {
