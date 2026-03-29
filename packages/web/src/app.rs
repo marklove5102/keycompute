@@ -24,7 +24,10 @@ pub fn App() -> Element {
 /// 带 AppShell 侧边栏布局的页面外壳
 #[component]
 pub fn AppLayout() -> Element {
-    let nav_sections = vec![
+    let user_store = use_context::<UserStore>();
+    let is_admin = user_store.is_admin();
+
+    let mut nav_sections = vec![
         NavSection {
             title: None,
             items: vec![
@@ -47,6 +50,23 @@ pub fn AppLayout() -> Element {
             ],
         },
     ];
+
+    // Admin 专属导航分组（仅 admin 角色可见）
+    if is_admin {
+        nav_sections.push(NavSection {
+            title: Some("管理".to_string()),
+            items: vec![
+                NavItem::new("用户管理", "/admin/users", NavIcon::User),
+                NavItem::new("渠道账号", "/admin/accounts", NavIcon::Key),
+                NavItem::new("计费定价", "/admin/pricing", NavIcon::Wallet),
+                NavItem::new("支付订单", "/admin/payment-orders", NavIcon::Wallet),
+                NavItem::new("分销记录", "/admin/distribution-records", NavIcon::Share),
+                NavItem::new("租户管理", "/admin/tenants", NavIcon::Home),
+                NavItem::new("系统诊断", "/admin/system", NavIcon::Settings),
+                NavItem::new("系统设置", "/admin/settings", NavIcon::Settings),
+            ],
+        });
+    }
 
     rsx! {
         AppShell {

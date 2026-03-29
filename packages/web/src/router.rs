@@ -8,6 +8,9 @@ use crate::views::{
     dashboard::Dashboard,
     distribution::DistributionOverview,
     payments::{PaymentsOverview, Recharge},
+    shared::{
+        Accounts, DistributionRecords, PaymentOrders, Pricing, Settings, System, Tenants, Users,
+    },
     user::{UserProfile, UserSettings},
 };
 
@@ -38,6 +41,24 @@ pub enum Route {
         UserProfile {},
         #[route("/user/settings")]
         UserSettings {},
+
+        // Admin / 管理功能页面
+        #[route("/admin/users")]
+        Users {},
+        #[route("/admin/accounts")]
+        Accounts {},
+        #[route("/admin/pricing")]
+        Pricing {},
+        #[route("/admin/payment-orders")]
+        PaymentOrders {},
+        #[route("/admin/distribution-records")]
+        DistributionRecords {},
+        #[route("/admin/tenants")]
+        Tenants {},
+        #[route("/admin/system")]
+        System {},
+        #[route("/admin/settings")]
+        Settings {},
     #[end_layout]
 
     // 404
