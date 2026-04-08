@@ -147,7 +147,7 @@ impl GatewayExecutor {
         }
 
         // 所有 target 都失败
-        Err(last_error.unwrap_or(KeyComputeError::RoutingFailed))
+        Err(last_error.unwrap_or_else(|| KeyComputeError::RoutingFailed(ctx.model.clone())))
     }
 
     /// 尝试执行单个 target

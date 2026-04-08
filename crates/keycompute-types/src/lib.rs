@@ -11,7 +11,7 @@ pub mod response;
 pub mod usage;
 
 // 重新导出最常用的类型
-pub use error::{KeyComputeError, Result};
+pub use error::{ErrorCategory, KeyComputeError, Result};
 pub use execution_plan::{ExecutionPlan, ExecutionTarget};
 pub use pricing::PricingSnapshot;
 pub use request::{ChatCompletionRequest, Message, RequestContext};

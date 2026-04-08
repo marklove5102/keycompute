@@ -59,7 +59,7 @@ impl RetryPolicy {
         !matches!(
             error,
             keycompute_types::KeyComputeError::AuthError(_)
-                | keycompute_types::KeyComputeError::RateLimitExceeded
+                | keycompute_types::KeyComputeError::RateLimitExceeded(_)
         )
     }
 }

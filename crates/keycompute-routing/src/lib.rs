@@ -153,7 +153,7 @@ impl RoutingEngine {
                 request_id = %ctx.request_id,
                 "route: no targets found, routing failed"
             );
-            return Err(KeyComputeError::RoutingFailed);
+            return Err(KeyComputeError::RoutingFailed(ctx.model.clone()));
         }
 
         tracing::info!(

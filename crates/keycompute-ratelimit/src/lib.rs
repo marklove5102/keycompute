@@ -158,7 +158,10 @@ pub trait RateLimiter: Send + Sync + std::fmt::Debug {
         config: &RateLimitConfig,
     ) -> Result<()> {
         if !self.check_with_config(key, config).await? {
-            return Err(KeyComputeError::RateLimitExceeded);
+            return Err(KeyComputeError::RateLimitExceeded(format!(
+                "RPM limit exceeded for tenant {}",
+                key.tenant_id
+            )));
         }
         self.record(key).await
     }
@@ -359,7 +362,10 @@ impl RateLimitService {
     /// 检查并记录请求（使用默认限制）
     pub async fn check_and_record(&self, key: &RateLimitKey) -> Result<()> {
         if !self.limiter.check(key).await? {
-            return Err(KeyComputeError::RateLimitExceeded);
+            return Err(KeyComputeError::RateLimitExceeded(format!(
+                "RPM limit exceeded for tenant {}",
+                key.tenant_id
+            )));
         }
         self.limiter.record(key).await
     }
@@ -377,7 +383,7 @@ impl RateLimitService {
             .check_and_record_with_config(key, config)
             .await
             .map_err(|e| {
-                if matches!(e, KeyComputeError::RateLimitExceeded) {
+                if matches!(e, KeyComputeError::RateLimitExceeded(_)) {
                     tracing::warn!(
                         tenant_id = %key.tenant_id,
                         user_id = %key.user_id,

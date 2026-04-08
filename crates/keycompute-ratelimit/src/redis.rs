@@ -210,7 +210,10 @@ impl RateLimiter for RedisRateLimiter {
         if result == 1 {
             Ok(())
         } else {
-            Err(KeyComputeError::RateLimitExceeded)
+            Err(KeyComputeError::RateLimitExceeded(format!(
+                "Redis rate limit exceeded for tenant {}",
+                key.tenant_id
+            )))
         }
     }
 

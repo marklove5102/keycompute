@@ -97,19 +97,46 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 /// 从 keycompute-types 错误转换
 impl From<keycompute_types::KeyComputeError> for ApiError {
     fn from(err: keycompute_types::KeyComputeError) -> Self {
+        use keycompute_types::KeyComputeError;
         match err {
-            keycompute_types::KeyComputeError::AuthError(msg) => ApiError::Auth(msg),
-            keycompute_types::KeyComputeError::RateLimitExceeded => {
-                ApiError::RateLimit("Rate limit exceeded".to_string())
+            // 认证与授权
+            KeyComputeError::AuthError(msg) => ApiError::Auth(msg),
+            KeyComputeError::PermissionDenied(msg) => ApiError::Forbidden(msg),
+
+            // 限流
+            KeyComputeError::RateLimitExceeded(msg) => ApiError::RateLimit(msg),
+
+            // 路由
+            KeyComputeError::RoutingFailed(msg) => ApiError::Routing(msg),
+
+            // Provider
+            KeyComputeError::ProviderError(msg) => ApiError::Provider(msg),
+            KeyComputeError::ProviderTimeout(ms, msg) => {
+                ApiError::Provider(format!("timeout after {}ms: {}", ms, msg))
             }
-            keycompute_types::KeyComputeError::RoutingFailed => {
-                ApiError::Routing("No available provider".to_string())
+
+            // 数据库
+            KeyComputeError::DatabaseError(msg) => ApiError::Internal(msg),
+
+            // 配置
+            KeyComputeError::ConfigError(msg) => ApiError::Config(msg),
+
+            // 验证与请求
+            KeyComputeError::ValidationError(msg) => ApiError::BadRequest(msg),
+            KeyComputeError::InvalidRequest(msg) => ApiError::BadRequest(msg),
+
+            // 未找到
+            KeyComputeError::NotFound(msg) => ApiError::NotFound(msg),
+
+            // 网络
+            KeyComputeError::NetworkError(msg) => ApiError::Provider(msg),
+            KeyComputeError::Timeout(msg) => {
+                ApiError::Provider(format!("Request timeout: {}", msg))
             }
-            keycompute_types::KeyComputeError::ProviderError(msg) => ApiError::Provider(msg),
-            keycompute_types::KeyComputeError::Internal(msg) => ApiError::Internal(msg),
-            keycompute_types::KeyComputeError::ValidationError(msg) => ApiError::BadRequest(msg),
-            keycompute_types::KeyComputeError::NotFound(msg) => ApiError::NotFound(msg),
-            _ => ApiError::Internal(err.to_string()),
+
+            // 内部错误
+            KeyComputeError::Internal(msg) => ApiError::Internal(msg),
+            KeyComputeError::SerializationError(msg) => ApiError::Internal(msg),
         }
     }
 }

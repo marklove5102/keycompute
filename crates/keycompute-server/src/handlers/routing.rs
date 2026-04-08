@@ -196,7 +196,7 @@ pub async fn debug_routing(
 
             Ok(Json(response))
         }
-        Err(keycompute_types::KeyComputeError::RoutingFailed) => {
+        Err(keycompute_types::KeyComputeError::RoutingFailed(_)) => {
             // 路由失败，但仍返回诊断信息
             let response = RoutingDebugResponse {
                 request_id,

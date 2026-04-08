@@ -163,13 +163,14 @@ pub async fn rate_limit_middleware(
             // 限流检查通过，继续处理请求
             next.run(req).await
         }
-        Err(keycompute_types::KeyComputeError::RateLimitExceeded) => {
+        Err(keycompute_types::KeyComputeError::RateLimitExceeded(ref msg)) => {
             // 触发限流
             info!(
                 tenant_id = %rate_key.tenant_id,
                 user_id = %rate_key.user_id,
                 rpm_limit = rate_limit_config.rpm_limit,
-                "Rate limit exceeded"
+                "Rate limit exceeded: {}",
+                msg
             );
             (
                 StatusCode::TOO_MANY_REQUESTS,
