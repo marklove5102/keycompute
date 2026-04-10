@@ -237,6 +237,9 @@ impl AppState {
     }
 
     /// 根据配置创建限流服务
+    ///
+    /// 如果 Redis 后端创建失败，会优雅降级到内存后端，
+    /// 确保应用不会因为 Redis 不可用而无法启动。
     fn create_rate_limiter(
         config: &RateLimitBackendConfig,
     ) -> keycompute_ratelimit::RateLimitService {
@@ -246,12 +249,27 @@ impl AppState {
             }
             #[cfg(feature = "redis")]
             RateLimitBackendConfig::Redis { url } => {
-                keycompute_ratelimit::RateLimitService::new_redis(url)
-                    .expect("Failed to create Redis rate limiter")
+                match keycompute_ratelimit::RateLimitService::new_redis(url) {
+                    Ok(service) => {
+                        tracing::info!(redis_url = %url, "Redis rate limiter initialized successfully");
+                        service
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            redis_url = %url,
+                            error = %e,
+                            "Failed to create Redis rate limiter, falling back to memory backend"
+                        );
+                        keycompute_ratelimit::RateLimitService::default_memory()
+                    }
+                }
             }
             #[cfg(not(feature = "redis"))]
             RateLimitBackendConfig::Redis { .. } => {
-                panic!("Redis backend requested but redis feature is not enabled")
+                tracing::warn!(
+                    "Redis backend requested but redis feature is not enabled, falling back to memory backend"
+                );
+                keycompute_ratelimit::RateLimitService::default_memory()
             }
         }
     }

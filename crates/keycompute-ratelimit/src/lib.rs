@@ -88,51 +88,70 @@ impl RateLimitKey {
     }
 }
 
-/// 限流计数器
+/// 限流计数器（单一 key 的完整状态）
+///
+/// 包含请求计数、Token 计数和共享的窗口时间戳。
+/// 共享窗口确保 RPM 和 TPM 始终同步。
 #[derive(Debug)]
-struct RateCounter {
-    /// 当前计数
-    count: AtomicU64,
-    /// 窗口开始时间
-    window_start: Instant,
+struct RateLimitEntry {
+    /// 请求计数
+    request_count: AtomicU64,
+    /// Token 计数
+    token_count: AtomicU64,
+    /// 窗口开始时间（共享）
+    window_start: std::sync::Mutex<Instant>,
     /// 窗口大小
     window_size: Duration,
 }
 
-impl Clone for RateCounter {
-    fn clone(&self) -> Self {
-        Self {
-            count: AtomicU64::new(self.count.load(Ordering::Relaxed)),
-            window_start: self.window_start,
-            window_size: self.window_size,
-        }
-    }
-}
-
-impl RateCounter {
+impl RateLimitEntry {
     fn new(window_size: Duration) -> Self {
         Self {
-            count: AtomicU64::new(0),
-            window_start: Instant::now(),
+            request_count: AtomicU64::new(0),
+            token_count: AtomicU64::new(0),
+            window_start: std::sync::Mutex::new(Instant::now()),
             window_size,
         }
     }
 
     fn is_expired(&self) -> bool {
-        Instant::now().duration_since(self.window_start) > self.window_size
+        let start = self.window_start.lock().unwrap();
+        Instant::now().duration_since(*start) > self.window_size
     }
 
-    fn reset(&mut self) {
-        self.count.store(0, Ordering::Relaxed);
-        self.window_start = Instant::now();
+    /// 重置计数器（原子操作）
+    ///
+    /// 返回 true 表示执行了重置，false 表示窗口未过期
+    fn reset_if_expired(&self) -> bool {
+        let mut start = self.window_start.lock().unwrap();
+        if Instant::now().duration_since(*start) > self.window_size {
+            self.request_count.store(0, Ordering::Relaxed);
+            self.token_count.store(0, Ordering::Relaxed);
+            *start = Instant::now();
+            true
+        } else {
+            false
+        }
     }
 
-    fn increment(&self) -> u64 {
-        self.count.fetch_add(1, Ordering::Relaxed) + 1
+    fn increment_request(&self) -> u64 {
+        self.request_count.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    fn count(&self) -> u64 {
-        self.count.load(Ordering::Relaxed)
+    fn add_tokens(&self, tokens: u64) {
+        self.token_count.fetch_add(tokens, Ordering::Relaxed);
+    }
+
+    fn request_count(&self) -> u64 {
+        self.request_count.load(Ordering::Relaxed)
+    }
+
+    fn token_count(&self) -> u64 {
+        self.token_count.load(Ordering::Relaxed)
+    }
+
+    fn decrement_request(&self) {
+        self.request_count.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -179,10 +198,8 @@ pub trait RateLimiter: Send + Sync + std::fmt::Debug {
 /// 内存限流器
 #[derive(Debug)]
 pub struct MemoryRateLimiter {
-    /// 请求计数器
-    request_counters: DashMap<RateLimitKey, RateCounter>,
-    /// Token 计数器
-    token_counters: DashMap<RateLimitKey, RateCounter>,
+    /// 限流条目（包含请求计数、Token计数和共享窗口）
+    entries: DashMap<RateLimitKey, RateLimitEntry>,
     window_size: Duration,
 }
 
@@ -190,60 +207,25 @@ impl MemoryRateLimiter {
     /// 创建新的内存限流器
     pub fn new() -> Self {
         Self {
-            request_counters: DashMap::new(),
-            token_counters: DashMap::new(),
+            entries: DashMap::new(),
             window_size: Duration::from_secs(WINDOW_SECS),
         }
     }
 
     /// 清理过期计数器
     pub fn cleanup(&self) {
-        self.request_counters
-            .retain(|_, counter| !counter.is_expired());
-        self.token_counters
-            .retain(|_, counter| !counter.is_expired());
+        self.entries.retain(|_, entry| !entry.is_expired());
     }
 
-    /// 获取或创建请求计数器条目
-    fn get_request_counter_entry(
+    /// 获取或创建限流条目
+    fn get_or_create_entry(
         &self,
         key: &RateLimitKey,
-    ) -> dashmap::mapref::one::Ref<'_, RateLimitKey, RateCounter> {
-        self.request_counters
+    ) -> dashmap::mapref::one::Ref<'_, RateLimitKey, RateLimitEntry> {
+        self.entries
             .entry(key.clone())
-            .or_insert_with(|| RateCounter::new(self.window_size))
+            .or_insert_with(|| RateLimitEntry::new(self.window_size))
             .downgrade()
-    }
-
-    /// 获取或创建 Token 计数器条目
-    fn get_token_counter_entry(
-        &self,
-        key: &RateLimitKey,
-    ) -> dashmap::mapref::one::Ref<'_, RateLimitKey, RateCounter> {
-        self.token_counters
-            .entry(key.clone())
-            .or_insert_with(|| RateCounter::new(self.window_size))
-            .downgrade()
-    }
-
-    /// 获取请求计数器的可变条目
-    fn get_request_counter_mut(
-        &self,
-        key: &RateLimitKey,
-    ) -> dashmap::mapref::one::RefMut<'_, RateLimitKey, RateCounter> {
-        self.request_counters
-            .entry(key.clone())
-            .or_insert_with(|| RateCounter::new(self.window_size))
-    }
-
-    /// 获取 Token 计数器的可变条目
-    fn get_token_counter_mut(
-        &self,
-        key: &RateLimitKey,
-    ) -> dashmap::mapref::one::RefMut<'_, RateLimitKey, RateCounter> {
-        self.token_counters
-            .entry(key.clone())
-            .or_insert_with(|| RateCounter::new(self.window_size))
     }
 }
 
@@ -265,46 +247,62 @@ impl RateLimiter for MemoryRateLimiter {
         key: &RateLimitKey,
         config: &RateLimitConfig,
     ) -> Result<bool> {
-        // 检查是否过期，如果过期重置
-        if let Some(counter) = self.request_counters.get(key)
-            && counter.is_expired()
-        {
-            drop(counter);
-            if let Some(mut entry) = self.request_counters.get_mut(key) {
-                entry.reset();
-            }
-            // 同时重置 Token 计数器
-            if let Some(mut entry) = self.token_counters.get_mut(key) {
-                entry.reset();
-            }
-        }
-
-        // 获取计数并检查
-        let counter = self.get_request_counter_entry(key);
-        let count = counter.count();
-        Ok(count < config.rpm_limit as u64)
+        let entry = self.get_or_create_entry(key);
+        entry.reset_if_expired();
+        Ok(entry.request_count() < config.rpm_limit as u64)
     }
 
     async fn record(&self, key: &RateLimitKey) -> Result<()> {
-        let counter = self.get_request_counter_mut(key);
-        counter.increment();
+        let entry = self.get_or_create_entry(key);
+        entry.increment_request();
         Ok(())
     }
 
     async fn record_tokens(&self, key: &RateLimitKey, tokens: u32) -> Result<()> {
-        let counter = self.get_token_counter_mut(key);
-        counter.count.fetch_add(tokens as u64, Ordering::Relaxed);
+        let entry = self.get_or_create_entry(key);
+        entry.reset_if_expired();
+        entry.add_tokens(tokens as u64);
         Ok(())
     }
 
     async fn get_count(&self, key: &RateLimitKey) -> Result<u64> {
-        let counter = self.get_request_counter_entry(key);
-        Ok(counter.count())
+        let entry = self.get_or_create_entry(key);
+        Ok(entry.request_count())
     }
 
     async fn get_token_count(&self, key: &RateLimitKey) -> Result<u64> {
-        let counter = self.get_token_counter_entry(key);
-        Ok(counter.count())
+        let entry = self.get_or_create_entry(key);
+        Ok(entry.token_count())
+    }
+
+    /// 原子地检查并记录请求（使用租户特定限制）
+    ///
+    /// 实现策略：先原子增加，再检查是否超限，超限则回滚。
+    /// 使用单一 DashMap 条目保证窗口同步和操作原子性。
+    async fn check_and_record_with_config(
+        &self,
+        key: &RateLimitKey,
+        config: &RateLimitConfig,
+    ) -> Result<()> {
+        let entry = self.get_or_create_entry(key);
+
+        // 原子地检查并重置过期窗口
+        entry.reset_if_expired();
+
+        // 原子地增加计数
+        let new_count = entry.increment_request();
+
+        // 检查是否超限
+        if new_count > config.rpm_limit as u64 {
+            // 超限，回滚计数
+            entry.decrement_request();
+            return Err(KeyComputeError::RateLimitExceeded(format!(
+                "RPM limit exceeded for tenant {} (limit: {}, current: {}) ",
+                key.tenant_id, config.rpm_limit, new_count
+            )));
+        }
+
+        Ok(())
     }
 }
 
@@ -559,5 +557,68 @@ mod tests {
         // 检查 Token 计数
         let count = service.get_tpm_count(&key).await.unwrap();
         assert_eq!(count, 150);
+    }
+
+    /// 测试并发场景下的原子限流
+    /// 验证在高并发情况下，限流计数准确，不会超出限制
+    #[tokio::test]
+    async fn test_concurrent_atomic_rate_limit() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use tokio::task::JoinSet;
+
+        let service = Arc::new(RateLimitService::default_memory());
+        let key = RateLimitKey::new(Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+
+        // 设置限制为 5，并发 20 个请求
+        let config = Arc::new(RateLimitConfig::new(5, 1000));
+        let concurrent_requests = 20;
+
+        let success_count = Arc::new(AtomicU32::new(0));
+        let reject_count = Arc::new(AtomicU32::new(0));
+
+        let mut tasks = JoinSet::new();
+
+        for _ in 0..concurrent_requests {
+            let service = Arc::clone(&service);
+            let key = key.clone();
+            let config = Arc::clone(&config);
+            let success_count = Arc::clone(&success_count);
+            let reject_count = Arc::clone(&reject_count);
+
+            tasks.spawn(async move {
+                let result = service.check_and_record_with_config(&key, &config).await;
+                match result {
+                    Ok(()) => success_count.fetch_add(1, Ordering::Relaxed),
+                    Err(_) => reject_count.fetch_add(1, Ordering::Relaxed),
+                };
+            });
+        }
+
+        // 等待所有任务完成
+        while tasks.join_next().await.is_some() {}
+
+        let success = success_count.load(Ordering::Relaxed);
+        let reject = reject_count.load(Ordering::Relaxed);
+
+        // 验证：成功数应恰好等于限制数 5，拒绝数应为 15
+        assert_eq!(
+            success, 5,
+            "Expected exactly 5 successful requests, got {}",
+            success
+        );
+        assert_eq!(
+            reject, 15,
+            "Expected exactly 15 rejected requests, got {}",
+            reject
+        );
+
+        // 验证最终计数准确
+        let final_count = service.get_rpm_count(&key).await.unwrap();
+        assert_eq!(
+            final_count, 5,
+            "Final count should be exactly 5, got {}",
+            final_count
+        );
     }
 }
