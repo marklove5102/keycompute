@@ -295,7 +295,10 @@ cargo build -p keycompute-server --features redis
 
 ---
 
-## 许可证
+# 如何贡献
+
+
+# 许可证
 
 本项目采用 [MIT](LICENSE) 许可证开源。
 

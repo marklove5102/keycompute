@@ -8,13 +8,14 @@ keycompute-config = { path = "../keycompute-config" }
 keycompute-types = { path = "../keycompute-types" }
 
 # 异步运行时
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 
 # SMTP 客户端
 lettre = { version = "0.11", default-features = false, features = [
     "builder",
     "smtp-transport",
     "tokio1-rustls-tls",
+    "pool",
 ] }
 
 # 序列化
