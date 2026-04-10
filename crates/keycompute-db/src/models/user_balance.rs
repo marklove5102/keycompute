@@ -15,8 +15,6 @@ pub enum TransactionType {
     Recharge,
     /// 消费
     Consume,
-    /// 退款
-    Refund,
     /// 冻结
     Freeze,
     /// 解冻
@@ -28,7 +26,6 @@ impl TransactionType {
         match self {
             TransactionType::Recharge => "recharge",
             TransactionType::Consume => "consume",
-            TransactionType::Refund => "refund",
             TransactionType::Freeze => "freeze",
             TransactionType::Unfreeze => "unfreeze",
         }
@@ -38,7 +35,6 @@ impl TransactionType {
         match s {
             "recharge" => Some(TransactionType::Recharge),
             "consume" => Some(TransactionType::Consume),
-            "refund" => Some(TransactionType::Refund),
             "freeze" => Some(TransactionType::Freeze),
             "unfreeze" => Some(TransactionType::Unfreeze),
             _ => None,

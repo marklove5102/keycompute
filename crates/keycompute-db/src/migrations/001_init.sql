@@ -316,7 +316,7 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     amount DECIMAL(12, 2) NOT NULL,
     -- 币种（默认CNY）
     currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
-    -- 订单状态: pending/paid/failed/closed/refunded
+    -- 订单状态: pending/paid/failed/closed
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     -- 支付方式: alipay
     payment_method VARCHAR(20) NOT NULL DEFAULT 'alipay',
@@ -359,7 +359,7 @@ COMMENT ON COLUMN payment_orders.out_trade_no IS '商户订单号（外部订单
 COMMENT ON COLUMN payment_orders.trade_no IS '支付宝交易号';
 COMMENT ON COLUMN payment_orders.amount IS '订单金额（单位：元）';
 COMMENT ON COLUMN payment_orders.currency IS '币种';
-COMMENT ON COLUMN payment_orders.status IS '订单状态: pending/paid/failed/closed/refunded';
+COMMENT ON COLUMN payment_orders.status IS '订单状态: pending/paid/failed/closed';
 COMMENT ON COLUMN payment_orders.payment_method IS '支付方式';
 COMMENT ON COLUMN payment_orders.subject IS '商品标题';
 COMMENT ON COLUMN payment_orders.body IS '商品描述';
@@ -413,7 +413,7 @@ CREATE TABLE IF NOT EXISTS balance_transactions (
     order_id UUID REFERENCES payment_orders(id),
     -- 关联使用日志ID（可选）
     usage_log_id UUID REFERENCES usage_logs(id),
-    -- 交易类型: recharge/consume/refund/freeze/unfreeze
+    -- 交易类型: recharge/consume/freeze/unfreeze
     transaction_type VARCHAR(20) NOT NULL,
     -- 变动金额（正数为增加，负数为减少）
     amount DECIMAL(12, 2) NOT NULL,
@@ -439,7 +439,7 @@ CREATE INDEX idx_balance_transactions_created_at ON balance_transactions(created
 
 -- 添加注释
 COMMENT ON TABLE balance_transactions IS '余额变动记录表';
-COMMENT ON COLUMN balance_transactions.transaction_type IS '交易类型: recharge/consume/refund/freeze/unfreeze';
+COMMENT ON COLUMN balance_transactions.transaction_type IS '交易类型: recharge/consume/freeze/unfreeze';
 COMMENT ON COLUMN balance_transactions.amount IS '变动金额（正数为增加，负数为减少）';
 COMMENT ON COLUMN balance_transactions.balance_before IS '变动前余额';
 COMMENT ON COLUMN balance_transactions.balance_after IS '变动后余额';

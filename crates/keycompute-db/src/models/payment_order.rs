@@ -19,8 +19,6 @@ pub enum PaymentOrderStatus {
     Failed,
     /// 已关闭
     Closed,
-    /// 已退款
-    Refunded,
 }
 
 impl PaymentOrderStatus {
@@ -30,7 +28,6 @@ impl PaymentOrderStatus {
             PaymentOrderStatus::Paid => "paid",
             PaymentOrderStatus::Failed => "failed",
             PaymentOrderStatus::Closed => "closed",
-            PaymentOrderStatus::Refunded => "refunded",
         }
     }
 
@@ -40,7 +37,6 @@ impl PaymentOrderStatus {
             "paid" => Some(PaymentOrderStatus::Paid),
             "failed" => Some(PaymentOrderStatus::Failed),
             "closed" => Some(PaymentOrderStatus::Closed),
-            "refunded" => Some(PaymentOrderStatus::Refunded),
             _ => None,
         }
     }

@@ -15,7 +15,7 @@ use crate::utils::time::format_time;
 /// 支付订单页面
 ///
 /// - 普通用户：仅查看自己的订单
-/// - Admin：查看所有订单，支持审核和退款
+/// - Admin：查看所有订单
 #[component]
 pub fn PaymentOrders() -> Element {
     let user_store = use_context::<UserStore>();

@@ -582,13 +582,14 @@ impl PaymentService {
 }
 
 /// 生成商户订单号
+///
+/// 格式: KC + 14位时间戳 + 8位UUID随机后缀
+/// 冲突概率极低，支持高并发场景
 fn generate_out_trade_no() -> String {
     let timestamp = Utc::now().format("%Y%m%d%H%M%S");
-    let random: String = (0..6)
-        .map(|_| rand::random::<u8>() % 10)
-        .map(|d| char::from_digit(d as u32, 10).unwrap())
-        .collect();
-    format!("KC{}{}", timestamp, random)
+    // 使用 UUID 前8位作为随机后缀，提供约 4.3 billion 种组合
+    let uuid_suffix = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+    format!("KC{}{}", timestamp, uuid_suffix)
 }
 
 /// 创建订单请求
@@ -693,6 +694,29 @@ pub enum PaymentError {
     InvalidTradeStatus(String),
 }
 
+impl PaymentError {
+    /// 判断错误是否可重试
+    ///
+    /// 可重试错误：数据库临时故障、网络超时等，支付宝应该重试通知
+    /// 不可重试错误：签名错误、订单不存在、金额不匹配等，支付宝不应重试
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            // 数据库错误通常是可重试的（连接池耗尽、临时网络问题等）
+            PaymentError::DatabaseError(_) => true,
+            // 以下错误不可重试，重试也无法解决
+            PaymentError::ConfigError(_) => false,
+            PaymentError::ApiError(_) => false,
+            PaymentError::InvalidSignature => false,
+            PaymentError::MissingParam(_) => false,
+            PaymentError::OrderNotFound => false,
+            PaymentError::InvalidAmount => false,
+            PaymentError::InvalidOrderStatus => false,
+            PaymentError::AmountMismatch { .. } => false,
+            PaymentError::InvalidTradeStatus(_) => false,
+        }
+    }
+}
+
 impl From<crate::config::ConfigError> for PaymentError {
     fn from(e: crate::config::ConfigError) -> Self {
         PaymentError::ConfigError(e.to_string())
@@ -713,6 +737,18 @@ mod tests {
     fn test_generate_out_trade_no() {
         let order_no = generate_out_trade_no();
         assert!(order_no.starts_with("KC"));
-        assert_eq!(order_no.len(), 22); // KC + 14位时间戳 + 6位随机数
+        assert_eq!(order_no.len(), 24); // KC + 14位时间戳 + 8位UUID后缀
+
+        // 验证生成的订单号唯一性
+        let order_no2 = generate_out_trade_no();
+        assert_ne!(order_no, order_no2);
+
+        // 验证UUID后缀只包含十六进制字符
+        let uuid_suffix = &order_no[16..]; // KC(2) + 时间戳(14) = 16
+        assert!(
+            uuid_suffix.chars().all(|c| c.is_ascii_hexdigit()),
+            "UUID后缀应只包含十六进制字符: {}",
+            uuid_suffix
+        );
     }
 }

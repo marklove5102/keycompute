@@ -43,10 +43,7 @@ thiserror = "2"
 tracing = "0.1"
 
 # 内部依赖
-keycompute-db = { path = "../../keycompute-db" }
-
-# 随机数
-rand = "0.8"
+keycompute-db = { workspace = true }
 
 # URL编码
 percent-encoding = "2"

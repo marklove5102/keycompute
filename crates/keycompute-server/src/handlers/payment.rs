@@ -431,8 +431,16 @@ pub async fn alipay_notify(
     match payment_service.handle_notify(params).await {
         Ok(_) => Ok("success".to_string()),
         Err(e) => {
-            tracing::error!("处理支付宝通知失败: {}", e);
-            Ok("fail".to_string())
+            // 根据错误类型决定是否让支付宝重试
+            // 可重试错误（如数据库临时故障）：返回 "fail"，支付宝会重试
+            // 不可重试错误（如签名错误、订单不存在）：返回 "success"，支付宝停止重试
+            if e.is_retryable() {
+                tracing::error!("处理支付宝通知失败（将重试）: {}", e);
+                Ok("fail".to_string())
+            } else {
+                tracing::error!("处理支付宝通知失败（不重试）: {}", e);
+                Ok("success".to_string())
+            }
         }
     }
 }
