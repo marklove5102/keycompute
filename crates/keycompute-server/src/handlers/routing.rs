@@ -92,12 +92,12 @@ pub async fn debug_routing(
     // 1. 构建 PricingSnapshot
     let pricing = state
         .pricing
-        .create_snapshot(&query.model, &auth.tenant_id)
+        .create_snapshot(&query.model, &auth.tenant_id, None)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to create pricing snapshot: {}", e)))?;
 
     // 2. 构建模拟的 RequestContext
-    let ctx = RequestContext::new(
+    let mut ctx = RequestContext::new(
         auth.user_id,
         auth.tenant_id,
         auth.produce_ai_key_id,
@@ -155,6 +155,15 @@ pub async fn debug_routing(
     // 5. 执行路由（只读）
     match state.routing.route(&ctx).await {
         Ok(plan) => {
+            // 路由成功，根据实际 provider 更新定价
+            state
+                .pricing
+                .update_context_pricing(&mut ctx, &plan.primary.provider)
+                .await;
+
+            // 使用更新后的定价信息
+            let pricing = &ctx.pricing_snapshot;
+
             // 路由成功
             let response = RoutingDebugResponse {
                 request_id: ctx.request_id,
@@ -174,8 +183,8 @@ pub async fn debug_routing(
                     })
                     .collect(),
                 pricing: PricingInfo {
-                    model_name: pricing.model_name,
-                    currency: pricing.currency,
+                    model_name: pricing.model_name.clone(),
+                    currency: pricing.currency.clone(),
                     input_price_per_1k: pricing.input_price_per_1k.to_string(),
                     output_price_per_1k: pricing.output_price_per_1k.to_string(),
                 },

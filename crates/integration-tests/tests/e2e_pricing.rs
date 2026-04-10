@@ -24,7 +24,10 @@ async fn test_pricing_service_flow() {
 
     // 2. 创建价格快照（使用引用）
     let tenant_id = Uuid::new_v4();
-    let snapshot = service.create_snapshot("gpt-4o", &tenant_id).await.unwrap();
+    let snapshot = service
+        .create_snapshot("gpt-4o", &tenant_id, None)
+        .await
+        .unwrap();
 
     chain.add_step(
         "keycompute-pricing",
@@ -155,9 +158,12 @@ async fn test_pricing_model_variations() {
     let tenant_id = Uuid::new_v4();
 
     // 1. 获取不同模型的价格快照
-    let gpt4o = service.create_snapshot("gpt-4o", &tenant_id).await.unwrap();
+    let gpt4o = service
+        .create_snapshot("gpt-4o", &tenant_id, None)
+        .await
+        .unwrap();
     let gpt35 = service
-        .create_snapshot("gpt-3.5-turbo", &tenant_id)
+        .create_snapshot("gpt-3.5-turbo", &tenant_id, None)
         .await
         .unwrap();
 

@@ -211,7 +211,7 @@ pub async fn calculate_cost(
     let tenant_id = Uuid::nil();
     let pricing = state
         .pricing
-        .create_snapshot(&request.model, &tenant_id)
+        .create_snapshot(&request.model, &tenant_id, None)
         .await
         .map_err(|e| crate::error::ApiError::Internal(format!("Failed to get pricing: {}", e)))?;
 

@@ -67,7 +67,7 @@ pub async fn get_pricing(
 ) -> Result<Json<PricingResponse>> {
     let snapshot = state
         .pricing
-        .create_snapshot(&query.model, &auth.tenant_id)
+        .create_snapshot(&query.model, &auth.tenant_id, None)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to get pricing: {}", e)))?;
 
@@ -87,7 +87,7 @@ pub async fn calculate_cost(
 ) -> Result<Json<CostCalculationResponse>> {
     let snapshot = state
         .pricing
-        .create_snapshot(&request.model, &auth.tenant_id)
+        .create_snapshot(&request.model, &auth.tenant_id, None)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to get pricing: {}", e)))?;
 

@@ -12,6 +12,7 @@ use crate::{PricingSnapshot, UsageAccumulator};
 /// - `usage` 字段使用 `Arc<UsageAccumulator>` 实现共享状态，Clone 时会共享同一个用量累积器
 /// - 通过 `add_output_tokens()` 和 `set_input_tokens()` 方法安全地更新用量
 /// - 使用 `usage_snapshot()` 获取当前用量快照
+/// - `provider` 字段在路由确定后被设置，用于精确的定价查询
 #[derive(Debug, Clone)]
 pub struct RequestContext {
     pub request_id: Uuid,
@@ -19,6 +20,8 @@ pub struct RequestContext {
     pub tenant_id: Uuid,
     pub produce_ai_key_id: Uuid,
     pub model: String,
+    /// Provider 名称（路由确定后设置）
+    pub provider: Option<String>,
     pub messages: Vec<Message>,
     pub stream: bool,
     pub pricing_snapshot: PricingSnapshot, // 请求开始时固化
@@ -42,12 +45,23 @@ impl RequestContext {
             tenant_id,
             produce_ai_key_id,
             model: model.into(),
+            provider: None,
             messages,
             stream,
             pricing_snapshot,
             usage: Arc::new(UsageAccumulator::new()),
             started_at: Utc::now(),
         }
+    }
+
+    /// 设置 Provider（路由确定后调用）
+    pub fn set_provider(&mut self, provider: impl Into<String>) {
+        self.provider = Some(provider.into());
+    }
+
+    /// 更新定价快照（路由后根据实际 provider 更新）
+    pub fn update_pricing(&mut self, pricing: PricingSnapshot) {
+        self.pricing_snapshot = pricing;
     }
 
     /// 获取请求持续时间

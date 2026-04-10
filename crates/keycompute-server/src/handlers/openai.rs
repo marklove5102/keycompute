@@ -309,9 +309,10 @@ pub async fn chat_completions(
     }
 
     // 1. 构建 PricingSnapshot
+    // 注意：此时 provider 尚未确定（路由在之后执行），使用 None 采用默认值
     let pricing = state
         .pricing
-        .create_snapshot(&request.model, &auth.tenant_id)
+        .create_snapshot(&request.model, &auth.tenant_id, None)
         .await
         .map_err(|e| ApiError::Internal(format!("Failed to create pricing snapshot: {}", e)))?;
 
@@ -335,7 +336,7 @@ pub async fn chat_completions(
         .collect();
 
     // 4. 构建 RequestContext
-    let ctx = Arc::new(RequestContext::new(
+    let mut ctx = Arc::new(RequestContext::new(
         auth.user_id,
         auth.tenant_id,
         auth.produce_ai_key_id,
@@ -355,6 +356,15 @@ pub async fn chat_completions(
     let primary_provider = plan.primary.provider.clone();
     let primary_account_id = plan.primary.account_id;
 
+    // 5.1 根据实际 provider 更新定价（如果需要）
+    {
+        let ctx_mut = Arc::make_mut(&mut ctx);
+        state
+            .pricing
+            .update_context_pricing(ctx_mut, &primary_provider)
+            .await;
+    }
+
     tracing::info!(
         request_id = %request_id.0,
         model = %request.model,
@@ -363,7 +373,7 @@ pub async fn chat_completions(
         "Chat completion request"
     );
 
-    // 5. 执行（带超时保护）
+    // 6. 执行（带超时保护）
     tracing::info!(
         request_id = %request_id.0,
         "Starting gateway execute"
