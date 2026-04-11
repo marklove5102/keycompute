@@ -68,26 +68,59 @@ pub struct BillingRecord {
 
 /// 列出计费记录
 pub async fn list_billing_records(
-    State(_state): State<AppState>,
-    _auth: AuthExtractor,
-    Query(_query): Query<ListBillingQuery>,
+    State(state): State<AppState>,
+    auth: AuthExtractor,
+    Query(query): Query<ListBillingQuery>,
 ) -> Result<Json<BillingListResponse>> {
-    // TODO: 从数据库查询实际的计费记录
-    // 目前返回模拟数据
-    let records = vec![BillingRecord {
-        id: Uuid::new_v4(),
-        request_id: Uuid::new_v4(),
-        model_name: "gpt-4o".to_string(),
-        provider_name: "openai".to_string(),
-        input_tokens: 1000,
-        output_tokens: 500,
-        user_amount: Decimal::from(2),
-        currency: "CNY".to_string(),
-        status: "success".to_string(),
-        created_at: Utc::now(),
-    }];
+    // 检查数据库是否配置
+    let Some(pool) = &state.pool else {
+        return Err(crate::error::ApiError::Internal(
+            "Database not configured".to_string(),
+        ));
+    };
 
-    Ok(Json(BillingListResponse { records, total: 1 }))
+    // 分页参数
+    let limit = query.limit.unwrap_or(20).min(100);
+    let offset = query.offset.unwrap_or(0);
+
+    // 获取总数
+    let total = keycompute_db::UsageLog::count_by_tenant(pool, auth.tenant_id)
+        .await
+        .map_err(|e| {
+            crate::error::ApiError::Internal(format!("Failed to count billing records: {}", e))
+        })?;
+
+    // 从数据库查询计费记录
+    let logs = keycompute_db::UsageLog::find_by_tenant(pool, auth.tenant_id, limit, offset)
+        .await
+        .map_err(|e| {
+            crate::error::ApiError::Internal(format!("Failed to query billing records: {}", e))
+        })?;
+
+    // 转换为响应格式
+    let records: Vec<BillingRecord> = logs
+        .into_iter()
+        .map(|log| BillingRecord {
+            id: log.id,
+            request_id: log.request_id,
+            model_name: log.model_name,
+            provider_name: log.provider_name,
+            input_tokens: log.input_tokens,
+            output_tokens: log.output_tokens,
+            user_amount: bigdecimal_to_decimal(&log.user_amount),
+            currency: log.currency,
+            status: log.status,
+            created_at: log.created_at,
+        })
+        .collect();
+
+    Ok(Json(BillingListResponse { records, total }))
+}
+
+/// 将 BigDecimal 转换为 Decimal
+fn bigdecimal_to_decimal(value: &bigdecimal::BigDecimal) -> Decimal {
+    let s = value.to_string();
+    s.parse().unwrap_or_default()
 }
 
 /// 计费统计查询请求
@@ -138,34 +171,57 @@ pub struct ModelStats {
 
 /// 获取计费统计
 pub async fn get_billing_stats(
-    State(_state): State<AppState>,
-    _auth: AuthExtractor,
-    Query(_query): Query<BillingStatsQuery>,
+    State(state): State<AppState>,
+    auth: AuthExtractor,
+    Query(query): Query<BillingStatsQuery>,
 ) -> Result<Json<BillingStatsResponse>> {
-    // TODO: 从数据库查询实际的统计数据
-    // 目前返回模拟数据
-    let by_model = vec![
-        ModelStats {
-            model_name: "gpt-4o".to_string(),
-            request_count: 100,
-            input_tokens: 100000,
-            output_tokens: 50000,
-            amount: Decimal::from(200),
-        },
-        ModelStats {
-            model_name: "gpt-3.5-turbo".to_string(),
-            request_count: 200,
-            input_tokens: 150000,
-            output_tokens: 80000,
-            amount: Decimal::from(150),
-        },
-    ];
+    // 检查数据库是否配置
+    let Some(pool) = &state.pool else {
+        return Err(crate::error::ApiError::Internal(
+            "Database not configured".to_string(),
+        ));
+    };
+
+    // 时间范围
+    let now = Utc::now();
+    let start_time = query.start_time.unwrap_or(now - chrono::Duration::days(30));
+    let end_time = query.end_time.unwrap_or(now);
+
+    // 获取总体统计
+    let stats =
+        keycompute_db::UsageLog::get_stats_by_tenant(pool, auth.tenant_id, start_time, end_time)
+            .await
+            .map_err(|e| {
+                crate::error::ApiError::Internal(format!("Failed to query billing stats: {}", e))
+            })?;
+
+    // 获取按模型分组的统计
+    let model_stats = keycompute_db::UsageLog::get_stats_by_tenant_grouped_by_model(
+        pool,
+        auth.tenant_id,
+        start_time,
+        end_time,
+    )
+    .await
+    .map_err(|e| crate::error::ApiError::Internal(format!("Failed to query model stats: {}", e)))?;
+
+    // 转换为响应格式
+    let by_model: Vec<ModelStats> = model_stats
+        .into_iter()
+        .map(|m| ModelStats {
+            model_name: m.model_name,
+            request_count: m.request_count,
+            input_tokens: m.input_tokens,
+            output_tokens: m.output_tokens,
+            amount: bigdecimal_to_decimal(&m.amount),
+        })
+        .collect();
 
     Ok(Json(BillingStatsResponse {
-        total_requests: 300,
-        total_input_tokens: 250000,
-        total_output_tokens: 130000,
-        total_amount: Decimal::from(350),
+        total_requests: stats.total_requests,
+        total_input_tokens: stats.total_input_tokens,
+        total_output_tokens: stats.total_output_tokens,
+        total_amount: bigdecimal_to_decimal(&stats.total_amount),
         currency: "CNY".to_string(),
         by_model,
     }))

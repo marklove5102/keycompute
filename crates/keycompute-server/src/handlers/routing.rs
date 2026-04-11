@@ -248,10 +248,11 @@ pub async fn get_provider_health(
     _auth: AuthExtractor,
 ) -> Result<Json<ProviderHealthResponse>> {
     let providers = state.routing.healthy_providers().to_vec();
+    let account_count = state.account_states.all_states().len();
 
     Ok(Json(ProviderHealthResponse {
         healthy_providers: providers,
-        account_count: 0, // TODO: 从 AccountStateStore 获取实际数量
+        account_count,
     }))
 }
 

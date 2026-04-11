@@ -3,6 +3,7 @@
 //! 管理 Provider 的健康状态、延迟、成功率等指标。
 
 use dashmap::DashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Provider 健康状态
@@ -118,6 +119,8 @@ impl ProviderHealth {
 #[derive(Debug)]
 pub struct ProviderHealthStore {
     health_map: DashMap<String, ProviderHealth>,
+    /// 全局 fallback 计数器
+    fallback_count: AtomicU64,
 }
 
 impl Default for ProviderHealthStore {
@@ -131,6 +134,7 @@ impl ProviderHealthStore {
     pub fn new() -> Self {
         Self {
             health_map: DashMap::new(),
+            fallback_count: AtomicU64::new(0),
         }
     }
 
@@ -234,6 +238,23 @@ impl ProviderHealthStore {
                 "Stale provider health entries cleaned up"
             );
         }
+    }
+
+    /// 记录 fallback 事件
+    ///
+    /// 当请求从 primary provider 切换到 fallback provider 时调用
+    pub fn record_fallback(&self) {
+        self.fallback_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 获取 fallback 总数
+    pub fn get_fallback_count(&self) -> u64 {
+        self.fallback_count.load(Ordering::Relaxed)
+    }
+
+    /// 重置 fallback 计数
+    pub fn reset_fallback_count(&self) {
+        self.fallback_count.store(0, Ordering::Relaxed);
     }
 }
 

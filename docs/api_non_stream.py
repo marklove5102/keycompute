@@ -13,8 +13,8 @@ from openai import OpenAI
 API_MODEL = "deepseek-chat"
 
 API_URL = "http://192.168.100.100:3000/v1"
-API_KEY = "sk-8ede5f8a141c4669ae1499d1dbd0e042d9e123427f4549c5"
-# API_MODEL = "glm-5:cloud"
+API_KEY = "sk-e53734645ff1414fa308a394c474f0004559314290bb4eca"
+API_MODEL = "kimi-k2.5"
 
 client = OpenAI(base_url=API_URL, api_key=API_KEY)
 

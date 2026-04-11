@@ -165,6 +165,21 @@ impl UsageLog {
         Ok(logs)
     }
 
+    /// 获取租户的用量日志总数
+    pub async fn count_by_tenant(pool: &sqlx::PgPool, tenant_id: Uuid) -> Result<i64, DbError> {
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM usage_logs
+            WHERE tenant_id = $1
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_one(pool)
+        .await?;
+
+        Ok(count)
+    }
+
     /// 查找用户的用量日志
     pub async fn find_by_user(
         pool: &sqlx::PgPool,
@@ -272,4 +287,46 @@ impl UsageLog {
 
         Ok(stats)
     }
+
+    /// 获取租户按模型分组的统计
+    pub async fn get_stats_by_tenant_grouped_by_model(
+        pool: &sqlx::PgPool,
+        tenant_id: Uuid,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ModelStatsRow>, DbError> {
+        let stats = sqlx::query_as::<_, ModelStatsRow>(
+            r#"
+            SELECT
+                model_name,
+                COUNT(*) as request_count,
+                COALESCE(SUM(input_tokens), 0)::bigint as input_tokens,
+                COALESCE(SUM(output_tokens), 0)::bigint as output_tokens,
+                COALESCE(SUM(user_amount), 0) as amount
+            FROM usage_logs
+            WHERE tenant_id = $1
+              AND created_at >= $2
+              AND created_at < $3
+            GROUP BY model_name
+            ORDER BY request_count DESC
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(stats)
+    }
+}
+
+/// 按模型分组的统计
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct ModelStatsRow {
+    pub model_name: String,
+    pub request_count: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub amount: BigDecimal,
 }

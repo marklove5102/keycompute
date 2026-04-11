@@ -2,7 +2,12 @@
 //
 //! 处理各种 HTTP 请求
 
-pub mod admin;
+// 管理功能（拆分为多个模块）
+pub mod admin_account;
+pub mod admin_pricing;
+pub mod admin_settings;
+pub mod admin_user;
+
 pub mod auth;
 pub mod billing;
 pub mod distribution;
@@ -40,17 +45,30 @@ pub use user::{
     get_my_usage_stats, list_my_api_keys, update_profile,
 };
 
-// 管理功能
-pub use admin::{
-    create_account, create_pricing, delete_account, delete_pricing, delete_user,
-    get_system_setting_by_key, get_system_settings, get_user_by_id, list_accounts,
-    list_all_api_keys, list_all_users, list_pricing, list_tenants, refresh_account,
-    set_default_pricing, test_account, update_account, update_pricing,
-    update_system_setting_by_key, update_system_settings, update_user, update_user_balance,
+// 用户管理（admin_user）
+pub use admin_user::{
+    AdminUserInfo, UpdateUserRequest, UserListQueryParams, UserListResponse, delete_user,
+    get_user_by_id, list_all_api_keys, list_all_users, list_tenants, update_user,
+    update_user_balance,
 };
 
-// 公开设置（无需认证）
-pub use admin::get_public_settings;
+// 账号管理（admin_account）
+pub use admin_account::{
+    AccountInfo, CreateAccountRequest, UpdateAccountRequest, create_account, delete_account,
+    get_default_endpoint, list_accounts, refresh_account, test_account, update_account,
+};
+
+// 定价管理（admin_pricing）
+pub use admin_pricing::{
+    CreatePricingAdminRequest, PricingInfo, UpdatePricingAdminRequest, create_pricing,
+    delete_pricing, list_pricing, set_default_pricing, update_pricing,
+};
+
+// 系统设置（admin_settings）
+pub use admin_settings::{
+    AdminSystemSettings, get_public_settings, get_system_setting_by_key, get_system_settings,
+    update_system_setting_by_key, update_system_settings,
+};
 
 // 定价和账单
 pub use billing::{calculate_cost, get_billing_stats, list_billing_records};

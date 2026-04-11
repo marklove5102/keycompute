@@ -61,9 +61,10 @@ pub async fn get_gateway_status(
         .into_iter()
         .map(|name| {
             let health = state.provider_health.get_health(&name);
+            let supported_models = state.gateway.get_provider_models(&name);
             ProviderInfo {
                 name: name.clone(),
-                supported_models: vec![], // TODO: 从 Provider 获取支持的模型
+                supported_models,
                 healthy: health.as_ref().map(|h| h.healthy).unwrap_or(true),
             }
         })
@@ -112,6 +113,7 @@ pub async fn check_provider_health(
     let configured = state.gateway.has_provider(&request.provider);
 
     if let Some(health) = health {
+        let models = state.gateway.get_provider_models(&request.provider);
         Ok(Json(ProviderHealthResponse {
             provider: request.provider,
             healthy: health.healthy,
@@ -121,16 +123,17 @@ pub async fn check_provider_health(
             } else {
                 Some(format!("Success rate too low: {:.1}%", health.success_rate))
             },
-            models: vec![], // TODO: 从 Provider 获取支持的模型
+            models,
         }))
     } else if configured {
         // Provider 已配置但还没有请求记录，默认健康
+        let models = state.gateway.get_provider_models(&request.provider);
         Ok(Json(ProviderHealthResponse {
             provider: request.provider,
             healthy: true,
             latency_ms: None,
             error: None,
-            models: vec![],
+            models,
         }))
     } else {
         // Provider 未配置
@@ -217,7 +220,7 @@ pub async fn get_execution_stats(State(state): State<AppState>) -> Result<Json<E
         total_requests,
         successful_requests,
         failed_requests,
-        fallback_count: 0, // TODO: 从 Gateway 获取 fallback 统计
+        fallback_count: state.provider_health.get_fallback_count(),
         avg_latency_ms,
         provider_stats,
     }))

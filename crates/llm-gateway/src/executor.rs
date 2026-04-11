@@ -106,6 +106,7 @@ impl GatewayExecutor {
 
         let mut last_error = None;
         let _start_time = Instant::now();
+        let mut is_primary = true;
 
         for target in targets {
             let target_start = Instant::now();
@@ -118,12 +119,17 @@ impl GatewayExecutor {
                     let latency_ms = target_start.elapsed().as_millis() as u64;
                     if let Some(ref health_store) = provider_health {
                         health_store.record_success(&target.provider, latency_ms);
+                        // 如果不是 primary，说明使用了 fallback
+                        if !is_primary {
+                            health_store.record_fallback();
+                        }
                     }
 
                     tracing::info!(
                         request_id = %ctx.request_id,
                         provider = %target.provider,
                         latency_ms = latency_ms,
+                        is_fallback = !is_primary,
                         "Request executed successfully"
                     );
                     return Ok(rx);
@@ -144,6 +150,8 @@ impl GatewayExecutor {
                     last_error = Some(e);
                 }
             }
+            // 第一次循环后，后续都是 fallback
+            is_primary = false;
         }
 
         // 所有 target 都失败
@@ -327,6 +335,19 @@ impl GatewayExecutor {
     /// 获取 Provider 数量
     pub fn provider_count(&self) -> usize {
         self.providers.len()
+    }
+
+    /// 获取指定 Provider 支持的模型列表
+    pub fn get_provider_models(&self, provider_name: &str) -> Vec<String> {
+        self.providers
+            .get(provider_name)
+            .map(|p| {
+                p.supported_models()
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 

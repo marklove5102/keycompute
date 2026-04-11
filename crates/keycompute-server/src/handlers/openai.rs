@@ -376,11 +376,13 @@ pub async fn chat_completions(
     // 6. 执行（带超时保护）
     tracing::info!(
         request_id = %request_id.0,
+        timeout_secs = state.gateway_config.timeout_secs,
         "Starting gateway execute"
     );
 
+    let timeout_duration = std::time::Duration::from_secs(state.gateway_config.timeout_secs);
     let rx = match tokio::time::timeout(
-        std::time::Duration::from_secs(120),
+        timeout_duration,
         state.gateway.execute(
             Arc::clone(&ctx),
             plan,
@@ -394,9 +396,13 @@ pub async fn chat_completions(
         Err(_) => {
             tracing::error!(
                 request_id = %request_id.0,
-                "Gateway execute timeout after 120s"
+                timeout_secs = state.gateway_config.timeout_secs,
+                "Gateway execute timeout"
             );
-            return Err(ApiError::Internal("Gateway execute timeout".to_string()));
+            return Err(ApiError::Internal(format!(
+                "Gateway execute timeout after {}s",
+                state.gateway_config.timeout_secs
+            )));
         }
     };
 

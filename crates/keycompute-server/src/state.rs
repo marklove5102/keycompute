@@ -141,6 +141,8 @@ pub struct AppState {
     pub email_service: Arc<EmailService>,
     /// 支付服务（可选）
     pub payment: Option<Arc<keycompute_alipay::PaymentService>>,
+    /// Gateway 配置
+    pub gateway_config: keycompute_config::GatewayConfig,
 }
 
 impl std::fmt::Debug for AppState {
@@ -161,6 +163,7 @@ impl std::fmt::Debug for AppState {
                 "payment",
                 &self.payment.as_ref().map(|_| "<PaymentService>"),
             )
+            .field("gateway_config", &self.gateway_config)
             .finish()
     }
 }
@@ -233,6 +236,7 @@ impl AppState {
             billing,
             email_service,
             payment: None, // 支付服务需要数据库连接
+            gateway_config: config.gateway,
         }
     }
 
@@ -399,6 +403,7 @@ impl AppState {
             billing,
             email_service,
             payment,
+            gateway_config: config.gateway,
         }
     }
 
@@ -472,6 +477,7 @@ impl AppState {
             billing,
             email_service,
             payment: None, // 测试环境不需要支付服务
+            gateway_config: config.gateway,
         }
     }
 
