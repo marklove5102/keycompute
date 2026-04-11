@@ -265,6 +265,9 @@ async fn initialize_default_admin(pool: &sqlx::PgPool) -> anyhow::Result<()> {
         )
         .await?;
 
+    // 初始化默认管理员余额（创建余额记录，初始余额为 0）
+    initialize_admin_balance(pool, tenant.id, user.id).await?;
+
     // 创建默认分销规则（基于系统设置中的比例）
     initialize_default_distribution_rules(pool, tenant.id, user.id).await?;
 
@@ -350,5 +353,58 @@ async fn initialize_default_distribution_rules(
     }
 
     info!(tenant_id = %tenant_id, "默认分销规则初始化完成");
+    Ok(())
+}
+
+/// 初始化管理员余额
+///
+/// 为默认系统管理员充值 100 元初始余额
+/// 系统管理员不需要审计，直接设置余额
+async fn initialize_admin_balance(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+) -> anyhow::Result<()> {
+    use keycompute_db::UserBalance;
+    use rust_decimal::Decimal;
+
+    // 检查是否已存在余额记录
+    if let Some(existing_balance) = UserBalance::find_by_user(pool, user_id).await? {
+        // 如果已有余额且不为 0，说明已经初始化过，跳过
+        if existing_balance.available_balance > Decimal::ZERO {
+            info!(
+                user_id = %user_id,
+                balance = %existing_balance.available_balance,
+                "管理员余额已初始化，跳过"
+            );
+            return Ok(());
+        }
+    }
+
+    // 使用事务进行充值
+    let mut tx = pool.begin().await?;
+
+    let initial_amount = Decimal::new(100, 0); // 100 元
+    let (updated_balance, transaction) = UserBalance::recharge(
+        &mut tx,
+        user_id,
+        tenant_id,
+        initial_amount,
+        None, // 无订单 ID
+        Some("系统管理员初始余额"),
+    )
+    .await?;
+
+    tx.commit().await?;
+
+    info!(
+        user_id = %user_id,
+        tenant_id = %tenant_id,
+        balance_id = %updated_balance.id,
+        initial_balance = %updated_balance.available_balance,
+        transaction_id = %transaction.id,
+        "系统管理员初始余额充值成功"
+    );
+
     Ok(())
 }
